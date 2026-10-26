@@ -96,6 +96,7 @@ struct DocumentView: View {
                 if ProcessInfo.processInfo.environment["PAGECRAFT_QA_SPLIT"] != nil { editor.openSplit() }
                 if ProcessInfo.processInfo.environment["PAGECRAFT_QA_DEMO"] != nil { editor.placeQADemo() }
                 if let raw = ProcessInfo.processInfo.environment["PAGECRAFT_QA_SIDEBAR"], let tab = SidebarTab(rawValue: raw) { editor.sidebarTab = tab }
+                if let step = ProcessInfo.processInfo.environment["PAGECRAFT_QA_CONTENT"] { editor.runContentQA(step) }
                 #endif
             }
         }
@@ -158,10 +159,14 @@ struct DocumentView: View {
         }
         // The toolset's tools sit in a bar above the page, so they never cover content.
         .safeAreaInset(edge: .top, spacing: 0) {
-            if editor.mode.isMarkup || editor.mode == .scan {
+            if editor.mode.isMarkup || editor.mode == .scan || editor.mode == .edit {
                 VStack(spacing: 0) {
                     Group {
-                        if editor.mode == .scan { ScanBar(editor: editor) } else { ToolsetBar(editor: editor) }
+                        switch editor.mode {
+                        case .scan: ScanBar(editor: editor)
+                        case .edit: ContentEditBar(editor: editor)
+                        default: ToolsetBar(editor: editor)
+                        }
                     }
                     .background(.bar)
                     Divider()

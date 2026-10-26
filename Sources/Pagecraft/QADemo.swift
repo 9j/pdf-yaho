@@ -24,3 +24,27 @@ extension EditorController {
     }
 }
 #endif
+
+#if DEBUG
+extension EditorController {
+    /// Edit-mode states for automated screenshots: "select", "edit" (inline editor open) or "replace" (text rewritten).
+    func runContentQA(_ step: String) {
+        mode = .edit
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [self] in
+            guard let page = document.page(at: 0) else { return }
+            loadContent(on: page, force: true)
+            guard let block = contentBlocks.first(where: { $0.kind == .text && $0.text.count > 40 }) ?? contentBlocks.first else { return }
+            switch step {
+            case "edit":
+                selectedContent = block
+                pdfView?.beginContentEditing(block, on: page)
+            case "replace":
+                replaceContentText(block, on: page, with: "편집된 문단입니다. Pagecraft rewrote this paragraph with PDFium, keeping its font size and width.")
+            default:
+                selectedContent = block
+            }
+        }
+    }
+}
+#endif
+

@@ -4,7 +4,7 @@ import PDFKit
 /// Something to do as soon as a document window opens. Home-screen tools such as
 /// "Compress PDF" pick a file, open it, and queue the action here.
 enum LaunchAction: String, CaseIterable, Sendable {
-    case annotate, draw, fillAndSign, measure, redact, scan, pages, sign
+    case annotate, edit, draw, fillAndSign, measure, redact, scan, pages, sign
     case compress, recognizeText, setPassword, pageNumbers, resizePages, split, exportWord, exportExcel, exportPowerPoint, exportImages, compare
 }
 
@@ -54,6 +54,7 @@ extension EditorController {
     func perform(_ action: LaunchAction) {
         switch action {
         case .annotate: mode = .annotate
+        case .edit: mode = .edit
         case .draw: mode = .draw
         case .fillAndSign: mode = .fillSign
         case .sign: mode = .fillSign; tool = .signature

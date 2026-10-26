@@ -6,13 +6,14 @@ import SwiftUI
 /// The toolset shown in the toolbar. Each one brings its own floating tool bar, so no single
 /// palette has to hold every tool.
 enum EditorMode: String, CaseIterable, Identifiable {
-    case read, annotate, draw, fillSign, measure, redact, scan, pages
+    case read, annotate, edit, draw, fillSign, measure, redact, scan, pages
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .read: "Read"
         case .annotate: "Annotate"
+        case .edit: "Edit"
         case .draw: "Draw"
         case .fillSign: "Fill & Sign"
         case .measure: "Measure"
@@ -26,6 +27,7 @@ enum EditorMode: String, CaseIterable, Identifiable {
         switch self {
         case .read: "book"
         case .annotate: "highlighter"
+        case .edit: "character.textbox"
         case .draw: "pencil.and.scribble"
         case .fillSign: "rectangle.and.pencil.and.ellipsis"
         case .measure: "ruler"
@@ -39,6 +41,7 @@ enum EditorMode: String, CaseIterable, Identifiable {
         switch self {
         case .read: "Read without tools"
         case .annotate: "Highlight, notes, stamps and links"
+        case .edit: "Change the page's own text and images"
         case .draw: "Pens and shapes"
         case .fillSign: "Fill forms, sign and add form fields"
         case .measure: "Distances and areas"
@@ -58,6 +61,7 @@ enum EditorMode: String, CaseIterable, Identifiable {
         case .fillSign: [.select, .text, .checkmark, .cross, .date, .signature, .stamp, .formText, .formCheckbox, .formRadio, .formChoice, .eraser]
         case .measure: [.select, .measureDistance, .measurePerimeter, .measureArea, .eraser]
         case .redact: [.select, .redact, .eraser]
+        case .edit: [.editContent, .addContentText, .addContentImage]
         case .read, .scan, .pages: [.select, .crop, .snapshot]
         }
     }
@@ -69,13 +73,14 @@ enum EditorMode: String, CaseIterable, Identifiable {
         case .fillSign: .text
         case .measure: .measureDistance
         case .redact: .redact
+        case .edit: .editContent
         default: .select
         }
     }
 
     /// The toolset a tool belongs to when the current one does not offer it.
     static func home(of tool: Tool) -> EditorMode? {
-        [EditorMode.annotate, .draw, .fillSign, .measure, .redact].first { $0.tools.contains(tool) }
+        [EditorMode.annotate, .edit, .draw, .fillSign, .measure, .redact].first { $0.tools.contains(tool) }
     }
 }
 
@@ -86,6 +91,7 @@ enum Tool: String, CaseIterable, Identifiable {
     case formText, formCheckbox, formRadio, formChoice
     case measureDistance, measurePerimeter, measureArea
     case redact, eraser, crop, snapshot
+    case editContent, addContentText, addContentImage
 
     var id: String { rawValue }
 
@@ -128,6 +134,9 @@ enum Tool: String, CaseIterable, Identifiable {
         case .eraser: "Eraser"
         case .crop: "Crop"
         case .snapshot: "Snapshot"
+        case .editContent: "Edit"
+        case .addContentText: "Add Text"
+        case .addContentImage: "Add Image"
         }
     }
 
@@ -180,6 +189,9 @@ enum Tool: String, CaseIterable, Identifiable {
         case .eraser: "eraser"
         case .crop: "crop"
         case .snapshot: "camera.viewfinder"
+        case .editContent: "character.cursor.ibeam"
+        case .addContentText: "textformat"
+        case .addContentImage: "photo.badge.plus"
         }
     }
 
@@ -257,7 +269,7 @@ enum Tool: String, CaseIterable, Identifiable {
     var usesFill: Bool { [.rectangle, .oval, .polygon, .cloud, .cloudPolygon].contains(self) }
     var usesDash: Bool { isShapeTool }
     /// Tools that are part of document editing rather than annotation.
-    var isUtility: Bool { [.select, .crop, .snapshot].contains(self) }
+    var isUtility: Bool { [.select, .crop, .snapshot, .editContent, .addContentText, .addContentImage].contains(self) }
 }
 
 struct ToolStyle: Equatable {
@@ -486,6 +498,18 @@ final class EditorController: ObservableObject {
     @Published var showPageSize = false
     @Published var showSplit = false
     @Published var showPageLabels = false
+
+    // Edit mode: the page's own text and images, read with PDFium for one page at a time.
+    @Published var contentBlocks: [ContentBlock] = []
+    @Published var selectedContent: ContentBlock?
+    @Published var hoveredContent: ContentBlock?
+    /// Where a block being dragged would land (page space).
+    @Published var contentDragFrame: CGRect?
+    /// The block whose text is open in the inline editor; its outline is hidden meanwhile.
+    @Published var editingContent: ContentBlock?
+    /// Style for text added in Edit mode.
+    @Published var contentTextStyle = TextStyle(fontName: "Helvetica", fontSize: 12)
+    var contentPage: PDFPage?
     @Published var headerFooterPreset: HeaderFooterPreset?
     /// Rectangle being drawn with the Crop tool, in page space.
     @Published var cropDraft: (page: PDFPage, rect: CGRect)? { didSet { overlayTick += 1 } }
@@ -717,7 +741,7 @@ final class EditorController: ObservableObject {
         NSDocumentController.shared.document(for: window)?.updateChangeCount(.changeDone)
     }
 
-    private func changed(_ pages: [PDFPage] = []) {
+    func changed(_ pages: [PDFPage] = []) {
         if pages.isEmpty {
             thumbnailCache.removeAll()
         } else {
@@ -728,7 +752,7 @@ final class EditorController: ObservableObject {
         overlayTick += 1
     }
 
-    private func registerUndo(_ name: String, _ action: @escaping @MainActor (EditorController) -> Void) {
+    func registerUndo(_ name: String, _ action: @escaping @MainActor (EditorController) -> Void) {
         undoManager?.registerUndo(withTarget: self) { target in
             MainActor.assumeIsolated { action(target) }
         }
@@ -794,6 +818,8 @@ final class EditorController: ObservableObject {
     private func modeChanged(from old: EditorMode) {
         guard mode != old else { return }
         select(nil)
+        if old == .edit { clearContent() }
+        if mode == .edit { DispatchQueue.main.async { [self] in enterEditMode() } }
         pdfView?.commitInline()
         if old.isMarkup { lastTool[old] = tool }
         if !mode.tools.contains(tool) || tool == .select {

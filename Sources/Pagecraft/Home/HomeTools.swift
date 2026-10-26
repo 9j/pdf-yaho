@@ -25,6 +25,9 @@ enum HomeTools {
 
     static let categories: [HomeToolCategory] = [
         HomeToolCategory(title: "Edit & Sign", tools: [
+            HomeTool(id: "edit", title: "Edit PDF", summary: "Change the page's own text and images.",
+                     symbol: EditorMode.edit.symbol, tint: .blue,
+                     run: picking(.edit, "Select a PDF to edit.")),
             HomeTool(id: "annotate", title: "Annotate", summary: "Highlight, underline and add notes.",
                      symbol: "highlighter", tint: .blue,
                      run: picking(.annotate, "Select a file to annotate.")),
@@ -103,6 +106,6 @@ enum HomeTools {
     /// The fixed shortlist shown on the Home page.
     static let featured: [HomeTool] = {
         let all = Dictionary(uniqueKeysWithValues: categories.flatMap(\.tools).map { ($0.id, $0) })
-        return ["annotate", "sign", "merge", "compress", "exportWord", "ocr"].compactMap { all[$0] }
+        return ["edit", "annotate", "sign", "merge", "compress", "exportWord", "ocr"].compactMap { all[$0] }
     }()
 }

@@ -13,6 +13,9 @@ struct DocumentOverlays: View {
                     BookmarkRibbon(marked: editor.isBookmarked(index)) { editor.toggleBookmark(index) }
                         .position(x: frame.maxX - 22, y: max(frame.minY, 0) + 18)
                 }
+                if editor.mode == .edit {
+                    ContentEditOverlay(editor: editor, size: geo.size)
+                }
                 if let frame = editor.cropFrame {
                     CropChrome(frame: frame, size: geo.size)
                     CropBar(editor: editor)

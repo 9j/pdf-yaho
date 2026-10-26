@@ -11,6 +11,9 @@ final class EditorPDFView: PDFView {
         case move(SelectedAnnotation, start: CGPoint, original: CGRect)
         case resize(SelectedAnnotation, anchor: CGPoint, original: CGRect)
         case crop(page: PDFPage, start: CGPoint)
+        /// Edit mode: a page text or image block being moved (or just clicked) or an image being resized.
+        case content(ContentBlock, page: PDFPage, start: CGPoint, moved: Bool)
+        case contentResize(ContentBlock, page: PDFPage, anchor: CGPoint)
     }
 
     /// Annotation under the pointer when a drawing tool was pressed; a plain click selects it instead of drawing.
@@ -86,6 +89,7 @@ final class EditorPDFView: PDFView {
         let hovered = page(for: loc, nearest: false)
         if hovered !== editor.hoverPage { editor.hoverPage = hovered }
         if loc.y < 70 { editor.pokeHUD() }
+        if editor.mode == .edit { contentMouseMoved(event, editor: editor, viewPoint: loc); return }
         if let (selected, anchor) = resizeAnchor(at: loc) { resizeCursor(for: selected, anchor: anchor).set(); return }
         if editor.tool != .eraser, editor.mode != .read, let (page, point, _) = pagePoint(event), let a = hit(point, on: page), Annotations.isMovable(a) {
             NSCursor.openHand.set()
@@ -117,6 +121,7 @@ final class EditorPDFView: PDFView {
         window?.makeFirstResponder(self)
         guard let editor, let (page, point, viewPoint) = pagePoint(event) else { return super.mouseDown(with: event) }
         editor.textSelectionActive = false
+        if editor.mode == .edit { contentMouseDown(event, editor: editor, page: page, point: point, viewPoint: viewPoint); return }
 
         if let (selected, anchor) = resizeAnchor(at: viewPoint) {
             drag = .resize(selected, anchor: anchor, original: selected.annotation.bounds)
@@ -178,6 +183,8 @@ final class EditorPDFView: PDFView {
         case .crop:
             drag = .crop(page: page, start: point)
             editor.cropDraft = nil
+        case .editContent, .addContentText, .addContentImage:
+            break  // handled in Edit mode
         }
     }
 
@@ -229,6 +236,16 @@ final class EditorPDFView: PDFView {
             Annotations.resize(selected.annotation, to: rect)
             annotationsChanged(on: selected.page)
             editor.objectWillChange.send()
+        case let .content(block, page, start, moved):
+            guard let (_, point, _) = pagePoint(event, page: page) else { return }
+            let delta = point - start
+            guard moved || hypot(delta.x, delta.y) * scaleFactor > 3 else { return }
+            self.drag = .content(block, page: page, start: start, moved: true)
+            NSCursor.closedHand.set()
+            editor.contentDragFrame = block.bounds.offsetBy(dx: delta.x, dy: delta.y)
+        case let .contentResize(block, page, anchor):
+            guard let (_, point, _) = pagePoint(event, page: page) else { return }
+            editor.contentDragFrame = Self.proportionalRect(from: anchor, to: point, aspect: block.bounds.width / max(block.bounds.height, 1))
         case let .crop(page, start):
             guard let (_, point, _) = pagePoint(event, page: page) else { return }
             let media = page.bounds(for: .mediaBox)
@@ -256,6 +273,17 @@ final class EditorPDFView: PDFView {
             if case .move = drag { NSCursor.openHand.set() }
         case .crop:
             break
+        case let .content(block, page, _, moved):
+            let frame = editor.contentDragFrame
+            editor.contentDragFrame = nil
+            if moved, let frame {
+                editor.moveContent(block, on: page, to: frame)
+            } else if block.kind == .text {
+                beginContentEditing(block, on: page)
+            }
+        case let .contentResize(block, page, _):
+            if let frame = editor.contentDragFrame, frame.width > 4 { editor.moveContent(block, on: page, to: frame) }
+            editor.contentDragFrame = nil
         case let .draw(page, start, stroke):
             showPreview(nil, on: nil)
             guard let (_, raw, _) = pagePoint(event, page: page) else { return }
@@ -268,6 +296,8 @@ final class EditorPDFView: PDFView {
                 return
             }
             switch editor.tool {
+            case .addContentImage:
+                DispatchQueue.main.async { editor.addContentImage(in: large ? rect : CGRect(origin: point, size: .zero), on: page) }
             case .image:
                 DispatchQueue.main.async { editor.placeImage(in: large ? rect : CGRect(origin: point, size: .zero), on: page) }
             case .link:
@@ -316,7 +346,7 @@ final class EditorPDFView: PDFView {
             return Annotations.ink(strokes: [stroke], color: editor.strokeColor(for: tool), lineWidth: style.width)
         case .redact:
             return Annotations.redaction(bounds: rect, style: editor.redactionStyle)
-        case .link, .image, .snapshot, .formText, .formCheckbox, .formRadio, .formChoice:
+        case .link, .image, .snapshot, .formText, .formCheckbox, .formRadio, .formChoice, .addContentImage:
             let a = PDFAnnotation(bounds: rect, forType: .square, withProperties: nil)
             a.color = .controlAccentColor
             let border = PDFBorder()
@@ -362,6 +392,7 @@ final class EditorPDFView: PDFView {
             editor.handlePagesKey(event)
             return
         }
+        if editor.mode == .edit, handleContentKey(event, editor: editor, modifiers: modifiers) { return }
         switch event.keyCode {
         case 51, 117 where editor.selected != nil:
             editor.deleteSelected()
@@ -407,6 +438,7 @@ final class EditorPDFView: PDFView {
 
     @objc override func copy(_ sender: Any?) {
         if editor?.mode == .pages { editor?.copyPages(); return }
+        if editor?.mode == .edit, editor?.selectedContent?.kind == .text { editor?.copySelectedContentText(); return }
         if let editor, editor.selected != nil { editor.copySelectedAnnotation() } else { super.copy(sender) }
     }
 
@@ -422,15 +454,131 @@ final class EditorPDFView: PDFView {
 
     @objc func delete(_ sender: Any?) {
         if editor?.mode == .pages { editor?.deletePages(); return }
+        if editor?.mode == .edit { editor?.deleteSelectedContent(); return }
         editor?.deleteSelected()
     }
 
     @objc func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {
+        case #selector(delete(_:)) where editor?.mode == .edit: return editor?.selectedContent != nil
+        case #selector(copy(_:)) where editor?.mode == .edit && editor?.selectedContent != nil: return true
         case #selector(cut(_:)), #selector(delete(_:)): return editor?.selected != nil || (editor?.mode == .pages && !(editor?.selectedPages.isEmpty ?? true))
         case #selector(paste(_:)): return editor?.annotationClipboard != nil || NSImage.canInit(with: .general)
         case #selector(copy(_:)): return editor?.selected != nil || editor?.mode == .pages || !(currentSelection?.string ?? "").isEmpty
         default: return true
+        }
+    }
+
+    // MARK: Edit mode
+
+    private func contentMouseMoved(_ event: NSEvent, editor: EditorController, viewPoint: CGPoint) {
+        if let (_, anchor) = contentResizeAnchor(at: viewPoint, editor: editor) {
+            if #available(macOS 15, *), let block = editor.selectedContent {
+                let right = anchor.x < block.bounds.midX, top = anchor.y < block.bounds.midY
+                NSCursor.frameResize(position: top ? (right ? .topRight : .topLeft) : (right ? .bottomRight : .bottomLeft), directions: .all).set()
+            } else {
+                NSCursor.crosshair.set()
+            }
+            return
+        }
+        guard let (page, point, _) = pagePoint(event) else { return }
+        // Stay on the selected block's page so a stray move to another page keeps the selection.
+        let hovered = editor.selectedContent == nil || page === editor.contentPage ? editor.contentBlock(at: point, on: page) : nil
+        if hovered != editor.hoveredContent { editor.hoveredContent = hovered }
+        switch editor.tool {
+        case .addContentText: NSCursor.iBeam.set()
+        case .addContentImage: NSCursor.crosshair.set()
+        default:
+            if let hovered { (hovered.kind == .text ? NSCursor.iBeam : NSCursor.openHand).set() } else { NSCursor.arrow.set() }
+        }
+    }
+
+    private func contentMouseDown(_ event: NSEvent, editor: EditorController, page: PDFPage, point: CGPoint, viewPoint: CGPoint) {
+        switch editor.tool {
+        case .addContentText:
+            if let block = editor.contentBlock(at: point, on: page), block.kind == .text {
+                editor.selectedContent = block
+                beginContentEditing(block, on: page)
+            } else {
+                editor.selectedContent = nil
+                beginNewContentText(at: point, on: page)
+            }
+        case .addContentImage:
+            editor.selectedContent = nil
+            drag = .draw(page: page, start: point, stroke: [point])
+        default:
+            if let (block, anchor) = contentResizeAnchor(at: viewPoint, editor: editor), let contentPage = editor.contentPage {
+                drag = .contentResize(block, page: contentPage, anchor: anchor)
+                return
+            }
+            guard let block = editor.contentBlock(at: point, on: page) else {
+                editor.selectedContent = nil
+                return
+            }
+            editor.selectedContent = block
+            drag = .content(block, page: page, start: point, moved: false)
+        }
+    }
+
+    /// The selected image's corner under a view point, with the opposite corner (page space) to resize from.
+    private func contentResizeAnchor(at viewPoint: CGPoint, editor: EditorController) -> (ContentBlock, CGPoint)? {
+        guard let block = editor.selectedContent, block.kind == .image, let page = editor.contentPage else { return nil }
+        let b = block.bounds
+        let corners = [(CGPoint(x: b.minX, y: b.minY), CGPoint(x: b.maxX, y: b.maxY)), (CGPoint(x: b.maxX, y: b.minY), CGPoint(x: b.minX, y: b.maxY)),
+                       (CGPoint(x: b.minX, y: b.maxY), CGPoint(x: b.maxX, y: b.minY)), (CGPoint(x: b.maxX, y: b.maxY), CGPoint(x: b.minX, y: b.minY))]
+        for (corner, opposite) in corners {
+            let v = convert(corner, from: page)
+            if abs(v.x - viewPoint.x) <= 7, abs(v.y - viewPoint.y) <= 7 { return (block, opposite) }
+        }
+        return nil
+    }
+
+    /// A rectangle from `anchor` towards `point` with the given width/height ratio.
+    static func proportionalRect(from anchor: CGPoint, to point: CGPoint, aspect: CGFloat) -> CGRect {
+        let dx = point.x - anchor.x, dy = point.y - anchor.y
+        let width = max(abs(dx), abs(dy) * aspect, 8)
+        let height = width / max(aspect, 0.01)
+        return CGRect(x: dx < 0 ? anchor.x - width : anchor.x, y: dy < 0 ? anchor.y - height : anchor.y, width: width, height: height)
+    }
+
+    private func handleContentKey(_ event: NSEvent, editor: EditorController, modifiers: NSEvent.ModifierFlags) -> Bool {
+        switch event.keyCode {
+        case 51, 117 where editor.selectedContent != nil:
+            editor.deleteSelectedContent()
+        case 53:
+            if editor.selectedContent != nil { editor.selectedContent = nil } else if editor.tool != .editContent { editor.tool = .editContent }
+        case 36 where editor.selectedContent?.kind == .text:
+            if let block = editor.selectedContent, let page = editor.contentPage { beginContentEditing(block, on: page) }
+        case 123, 124, 125, 126 where editor.selectedContent != nil:
+            let step: CGFloat = modifiers.contains(.shift) ? 10 : 1
+            let delta: (CGFloat, CGFloat) = [123: (-step, 0), 124: (step, 0), 125: (0, -step), 126: (0, step)][event.keyCode]!
+            editor.nudgeContent(dx: delta.0, dy: delta.1)
+        default:
+            return false
+        }
+        return true
+    }
+
+    /// Opens a paragraph of page text for typing, wrapped to its width and in its font.
+    func beginContentEditing(_ block: ContentBlock, on page: PDFPage) {
+        guard let editor, block.kind == .text else { return }
+        editor.editingContent = block
+        editor.contentTextStyle = block.style
+        startInline(kind: .content, page: page, anchor: CGPoint(x: block.bounds.minX, y: block.bounds.maxY), text: block.text,
+                    fontSize: block.style.fontSize, color: block.style.color, style: block.style,
+                    wrapWidth: block.bounds.width + 2) { [weak self] text in
+            guard let self, let editor = self.editor else { return }
+            editor.editingContent = nil
+            editor.replaceContentText(block, on: page, with: text)
+        }
+    }
+
+    func beginNewContentText(at point: CGPoint, on page: PDFPage) {
+        guard let editor else { return }
+        let style = editor.contentTextStyle
+        startInline(kind: .content, page: page, anchor: point, text: "", fontSize: style.fontSize, color: style.color, style: style) { [weak self] text in
+            guard let self, let editor = self.editor else { return }
+            editor.addContentText(text, at: point, on: page)
         }
     }
 
@@ -489,10 +637,15 @@ final class EditorPDFView: PDFView {
     }
 
     private func startInline(kind: InlineTextEditor.Kind, page: PDFPage, anchor: CGPoint, text: String,
-                             fontSize: CGFloat, color: NSColor, commit: @escaping (String) -> Void) {
+                             fontSize: CGFloat, color: NSColor, style: TextStyle? = nil, wrapWidth: CGFloat? = nil,
+                             commit: @escaping (String) -> Void) {
         commitInline()
         let viewAnchor = convert(anchor, from: page)
-        let editorView = InlineTextEditor(kind: kind, fontSize: fontSize * scaleFactor, color: color, text: text)
+        var font: NSFont?
+        if let style { font = NSFont(descriptor: style.font.fontDescriptor, size: style.fontSize * scaleFactor) }
+        let editorView = InlineTextEditor(kind: kind, fontSize: fontSize * scaleFactor, color: color, text: text, font: font,
+                                          wrapWidth: wrapWidth.map { $0 * scaleFactor },
+                                          lineHeight: style?.lineHeight.map { $0 * scaleFactor })
         editorView.onFinish = { [weak self, weak editorView] result in
             guard let self, let editorView, self.inline === editorView else { return }
             self.inline = nil
@@ -513,7 +666,7 @@ final class EditorPDFView: PDFView {
 
 /// A borderless text view placed over the page while a text box or note is being typed.
 final class InlineTextEditor: NSTextView, NSTextViewDelegate {
-    enum Kind { case text, note }
+    enum Kind { case text, note, content }
 
     let kind: Kind
     var onFinish: ((String?) -> Void)?
@@ -521,27 +674,43 @@ final class InlineTextEditor: NSTextView, NSTextViewDelegate {
     private var anchorFlipped = false
     private var finished = false
 
-    init(kind: Kind, fontSize: CGFloat, color: NSColor, text: String) {
+    /// Fixed line width for page text, which wraps like the paragraph it replaces.
+    private let wrapWidth: CGFloat?
+
+    init(kind: Kind, fontSize: CGFloat, color: NSColor, text: String, font customFont: NSFont? = nil,
+         wrapWidth: CGFloat? = nil, lineHeight: CGFloat? = nil) {
         self.kind = kind
+        self.wrapWidth = wrapWidth
         let storage = NSTextStorage()
         let layout = NSLayoutManager()
         storage.addLayoutManager(layout)
-        let container = NSTextContainer(size: CGSize(width: kind == .note ? 220 : 2000, height: 1_000_000))
+        let container = NSTextContainer(size: CGSize(width: wrapWidth ?? (kind == .note ? 220 : 2000), height: 1_000_000))
         container.widthTracksTextView = kind == .note
+        container.lineFragmentPadding = kind == .content ? 0 : 5
         layout.addTextContainer(container)
         super.init(frame: .zero, textContainer: container)
         delegate = self
         isRichText = false
         allowsUndo = true
-        font = NSFont.systemFont(ofSize: max(fontSize, 9))
+        font = customFont ?? NSFont.systemFont(ofSize: max(fontSize, 9))
+        if let lineHeight, lineHeight > 0 {
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.minimumLineHeight = lineHeight
+            paragraph.maximumLineHeight = lineHeight
+            defaultParagraphStyle = paragraph
+            typingAttributes[.paragraphStyle] = paragraph
+        }
         textColor = color
         insertionPointColor = .controlAccentColor
         string = text
+        if let paragraph = defaultParagraphStyle { textStorage?.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: (text as NSString).length)) }
         textContainerInset = CGSize(width: 6, height: 5)
         isVerticallyResizable = true
-        isHorizontallyResizable = kind == .text
+        isHorizontallyResizable = kind == .text || (kind == .content && wrapWidth == nil)
         drawsBackground = true
-        backgroundColor = kind == .note ? NSColor(srgbRed: 1, green: 0.96, blue: 0.72, alpha: 1) : NSColor.white.withAlphaComponent(0.92)
+        // Page text being edited covers the original with the page colour, so only the new words show.
+        backgroundColor = kind == .note ? NSColor(srgbRed: 1, green: 0.96, blue: 0.72, alpha: 1)
+            : kind == .content ? .white : NSColor.white.withAlphaComponent(0.92)
         wantsLayer = true
         layer?.cornerRadius = kind == .note ? 8 : 4
         layer?.borderWidth = 1.5
@@ -553,7 +722,7 @@ final class InlineTextEditor: NSTextView, NSTextViewDelegate {
             s.shadowOffset = CGSize(width: 0, height: -2)
             return s
         }()
-        selectAll(nil)
+        if kind == .content { setSelectedRange(NSRange(location: (text as NSString).length, length: 0)) } else { selectAll(nil) }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -568,11 +737,19 @@ final class InlineTextEditor: NSTextView, NSTextViewDelegate {
         guard let layout = layoutManager, let container = textContainer else { return }
         layout.ensureLayout(for: container)
         let used = layout.usedRect(for: container).size
-        let width = kind == .note ? 220 : max(used.width + 14, 120)
+        let width = kind == .note ? 220 : wrapWidth.map { $0 + 12 } ?? max(used.width + 14, 120)
         let height = max(used.height + 12, (font?.pointSize ?? 14) + 14)
-        let origin = kind == .note
+        var origin = kind == .note
             ? CGPoint(x: anchor.x + 14, y: anchorFlipped ? anchor.y - 10 : anchor.y + 10 - height)
             : CGPoint(x: anchor.x - 6, y: anchorFlipped ? anchor.y - 3 : anchor.y + 3 - height)
+        if kind == .content, let font {
+            // Line the top of the first line's letters up with the top of the page text it replaces;
+            // a fixed line height adds its extra space above the letters.
+            let line = layout.numberOfGlyphs > 0 ? layout.lineFragmentRect(forGlyphAt: 0, effectiveRange: nil) : .zero
+            let lettersTop = max(0, line.maxY + font.descender - font.ascender)
+            let top = textContainerInset.height + lettersTop
+            origin = CGPoint(x: anchor.x - textContainerInset.width, y: anchorFlipped ? anchor.y - top : anchor.y + top - height)
+        }
         frame = CGRect(origin: origin, size: CGSize(width: width, height: height))
     }
 
@@ -584,7 +761,9 @@ final class InlineTextEditor: NSTextView, NSTextViewDelegate {
     func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
         switch selector {
         case #selector(insertNewline(_:)):
-            if NSApp.currentEvent?.modifierFlags.contains(.shift) == true { insertNewlineIgnoringFieldEditor(nil); return true }
+            let flags = NSApp.currentEvent?.modifierFlags ?? []
+            // Page text is paragraphs: Return breaks a line and ⌘Return finishes; text boxes are the other way round.
+            if kind == .content ? !flags.contains(.command) : flags.contains(.shift) { insertNewlineIgnoringFieldEditor(nil); return true }
             finish(cancelled: false)
             return true
         case #selector(cancelOperation(_:)):
