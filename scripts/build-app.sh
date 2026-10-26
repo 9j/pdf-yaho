@@ -5,7 +5,7 @@ set -eu
 cd "$(dirname "$0")/.."
 
 config="${1:-release}"
-version="0.1.0"
+version="0.2.0"
 arch_flags=""
 for arch in ${ARCHS:-arm64 x86_64}; do arch_flags="$arch_flags --arch $arch"; done
 # shellcheck disable=SC2086

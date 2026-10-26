@@ -144,6 +144,42 @@ final class AnnotationTests: XCTestCase {
         XCTAssertEqual(Annotations.displayName(Annotations.redaction(bounds: .zero)), "Redaction")
     }
 
+    func testResizeScalesInkAndLines() throws {
+        let ink = try XCTUnwrap(Annotations.ink(strokes: [[CGPoint(x: 0, y: 0), CGPoint(x: 100, y: 50)]], color: .red, lineWidth: 2))
+        let target = CGRect(x: 10, y: 10, width: ink.bounds.width * 2, height: ink.bounds.height * 2)
+        let before = try XCTUnwrap(ink.paths?.first?.bounds)
+        Annotations.resize(ink, to: target)
+        XCTAssertEqual(ink.bounds, target)
+        let after = try XCTUnwrap(ink.paths?.first?.bounds)
+        XCTAssertEqual(after.width, before.width * 2, accuracy: 0.5)
+
+        let line = Annotations.shape(.line, from: .zero, to: CGPoint(x: 100, y: 0), color: .blue, lineWidth: 2)
+        let wider = CGRect(origin: line.bounds.origin, size: CGSize(width: line.bounds.width * 2, height: line.bounds.height))
+        let end = line.endPoint
+        Annotations.resize(line, to: wider)
+        XCTAssertEqual(line.endPoint.x, end.x * 2, accuracy: 0.01)
+    }
+
+    func testRecolorRespectsAnnotationKind() {
+        let text = Annotations.freeText("hi", at: CGPoint(x: 0, y: 100), color: .black, fontSize: 12)
+        Annotations.setColor(.red, of: text)
+        XCTAssertEqual(text.fontColor?.usingColorSpace(.sRGB)?.redComponent ?? 0, 1, accuracy: 0.05)
+        let highlight = Annotations.markup(.highlight, bounds: .init(x: 0, y: 0, width: 10, height: 10), color: .yellow)
+        Annotations.setColor(.green, of: highlight)
+        XCTAssertEqual(highlight.color.alphaComponent, 0.45, accuracy: 0.01)
+        XCTAssertEqual(Annotations.color(of: highlight).alphaComponent, 1)
+        let redaction = Annotations.redaction(bounds: .zero)
+        Annotations.setColor(.red, of: redaction)
+        XCTAssertEqual(redaction.color.usingColorSpace(.sRGB)?.redComponent ?? 1, 0, accuracy: 0.01)
+    }
+
+    func testDuplicateOffsetsCopy() throws {
+        let rect = Annotations.shape(.rectangle, from: .zero, to: CGPoint(x: 50, y: 50), color: .red, lineWidth: 2)
+        let copy = try XCTUnwrap(Annotations.duplicate(rect))
+        XCTAssertEqual(copy.bounds.origin, CGPoint(x: 12, y: -12))
+        XCTAssertFalse(copy === rect)
+    }
+
     func testSignatureNormalisesAndPlaces() throws {
         let sig = try XCTUnwrap(Signature(viewStrokes: [[CGPoint(x: 10, y: 10), CGPoint(x: 110, y: 60)]], viewHeight: 100))
         XCTAssertEqual(sig.aspectRatio, 2, accuracy: 0.001)

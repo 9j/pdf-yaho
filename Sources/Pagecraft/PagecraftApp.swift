@@ -1,16 +1,33 @@
 import PDFKit
 import SwiftUI
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    /// DocumentGroup always creates an untitled document at launch. When the app was launched
-    /// to open a file, close that blank document so only the requested file is shown.
+    /// DocumentGroup creates an untitled document at launch. Replace it with the Welcome window,
+    /// or just drop it when the app was launched to open a file.
     func applicationDidFinishLaunching(_ notification: Notification) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-            let documents = NSDocumentController.shared.documents
-            guard documents.contains(where: { $0.fileURL != nil }) else { return }
-            for document in documents where document.fileURL == nil && !document.isDocumentEdited {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            for document in NSDocumentController.shared.documents where document.fileURL == nil && !document.isDocumentEdited {
                 document.close()
             }
+            self.showWelcomeIfIdle()
+        }
+        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: nil, queue: .main) { _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                MainActor.assumeIsolated { self.showWelcomeIfIdle() }
+            }
+        }
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag { WelcomeWindowController.shared.show() }
+        return false
+    }
+
+    private func showWelcomeIfIdle() {
+        let hasDocumentWindow = NSApp.windows.contains { $0.isVisible && NSDocumentController.shared.document(for: $0) != nil }
+        if !hasDocumentWindow, NSApp.modalWindow == nil, !NSApp.windows.contains(where: { $0 is NSSavePanel && $0.isVisible }) {
+            WelcomeWindowController.shared.show()
         }
     }
 }
@@ -45,7 +62,10 @@ struct PagecraftCommands: Commands {
     var body: some Commands {
         CommandGroup(after: .newItem) {
             Button("New PDF from Images…") { Exporter.newFromImages() }
-            Button("Merge Files…") { Exporter.mergeFiles() }
+            Button("Merge PDFs…") { Exporter.mergeFiles() }
+            Divider()
+            Button("Welcome to Pagecraft") { WelcomeWindowController.shared.show() }
+                .keyboardShortcut("1", modifiers: [.command, .shift])
         }
         CommandGroup(after: .saveItem) {
             Menu("Export As") {
@@ -57,7 +77,7 @@ struct PagecraftCommands: Commands {
             .disabled(editor == nil)
             Button("Save as Flattened…") { run(Exporter.flattened) }.disabled(editor == nil)
             Button("Reduce File Size…") { run(Exporter.reducedSize) }.disabled(editor == nil)
-            Button("Set Password…") { run(Exporter.passwordProtected) }.disabled(editor == nil)
+            Button("Protect with Password…") { editor?.showPasswordSheet = true }.disabled(editor == nil)
             Divider()
             Button("Properties…") { editor?.showProperties = true }
                 .keyboardShortcut("i", modifiers: [.command, .option])
@@ -73,6 +93,11 @@ struct PagecraftCommands: Commands {
             Button("Find Previous") { editor?.findNext(-1) }.keyboardShortcut("g", modifiers: [.command, .shift])
         }
         CommandGroup(before: .toolbar) {
+            ForEach(Array(EditorMode.allCases.enumerated()), id: \.element) { index, mode in
+                Button(mode.rawValue) { editor?.mode = mode }
+                    .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .command)
+            }
+            Divider()
             Button("Zoom In") { editor?.zoomIn() }.keyboardShortcut("+")
             Button("Zoom Out") { editor?.zoomOut() }.keyboardShortcut("-")
             Button("Actual Size") { editor?.actualSize() }.keyboardShortcut("0")
@@ -95,20 +120,12 @@ struct PagecraftCommands: Commands {
             Button("First Page") { editor?.goToPage(0) }.keyboardShortcut(.upArrow)
             Button("Last Page") { editor.map { $0.goToPage($0.pageCount - 1) } }.keyboardShortcut(.downArrow)
             Divider()
-            Button("Go to Page…") {
-                guard let editor, let text = Prompt.text("Go to Page", message: "Page number (1–\(editor.pageCount)):"),
-                      let number = Int(text) else { return }
-                editor.goToPage(number - 1)
-            }
-            .keyboardShortcut("g", modifiers: [.command, .option])
+            Button("Go to Page…") { editor?.focusPageField = true }
+                .keyboardShortcut("g", modifiers: [.command, .option])
         }
-        CommandMenu("Annotate") {
-            ForEach(Array(Tool.allCases.enumerated()), id: \.element) { index, tool in
-                if index < 9 {
-                    Button(tool.label) { editor?.tool = tool }.keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: [.command, .control])
-                } else {
-                    Button(tool.label) { editor?.tool = tool }
-                }
+        CommandMenu("Markup") {
+            ForEach(Tool.allCases) { tool in
+                Button(tool.label) { editor?.tool = tool }
             }
             Divider()
             Button("Edit Signature…") { editor?.showSignaturePad = true }
@@ -127,13 +144,8 @@ struct PagecraftCommands: Commands {
             Divider()
             Button("Add Page Numbers") { editor?.addPageNumbers() }
             Button("Remove Page Numbers") { editor?.removePageNumbers() }
-            Button("Add Bookmark…") {
-                guard let editor,
-                      let label = Prompt.text("Add Bookmark", message: "Bookmark title:", defaultValue: "Page \(editor.currentPageIndex + 1)")
-                else { return }
-                editor.addBookmark(label: label, page: editor.currentPageIndex)
-            }
-            .keyboardShortcut("d")
+            Button("Bookmark This Page") { editor?.addBookmark() }
+                .keyboardShortcut("d")
         }
     }
 

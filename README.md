@@ -7,6 +7,29 @@ Pagecraft covers the everyday features of commercial PDF editors such as PDF Exp
 reading, annotating, signing, redacting, filling forms and rearranging pages.
 [docs/feature-parity.md](docs/feature-parity.md) lists what is done and what is planned.
 
+## Using it
+
+The toolbar switches between three modes:
+
+- **Read** is a clean reading view. Select text and a small menu offers Highlight, Underline, Strike and Copy.
+- **Markup** shows a floating tool palette. Each tool remembers its own colour and size, which you set
+  under **Style**. Click any annotation to select it. You can then drag it, resize it from a corner,
+  change its colour, duplicate it or delete it. Text boxes and notes are typed directly on the page.
+- **Pages** shows every page as a large thumbnail. Click, ⌘-click or ⇧-click to select pages, and drag
+  them to reorder. The bar at the bottom rotates, inserts, extracts and deletes.
+
+A capsule at the bottom of the page handles page navigation and zoom.
+
+| Key | Tool | Key | Tool |
+| --- | --- | --- | --- |
+| V | Select | T | Text |
+| H | Highlight | N | Note |
+| U | Underline | R / O / L / A | Rectangle / Oval / Line / Arrow |
+| K | Strikeout | G | Signature |
+| P | Pen | X | Redact |
+| E | Eraser | ⌫ | Delete selected annotation |
+| ⌘1 / ⌘2 / ⌘3 | Read / Markup / Pages | Arrow keys | Nudge selection (⇧ for 10 pt) |
+
 ## Features
 
 - **Read**: continuous, single, two-page and book layouts. Day, night and sepia themes.
@@ -46,6 +69,7 @@ right-click it and choose **Open**.
 | `Sources/Pagecraft` | SwiftUI app: document window, PDF view and tools, sidebar, menus. |
 | `Tests/PagecraftCoreTests` | XCTest suite for the core. |
 | `scripts/build-app.sh` | Builds the `.app` bundle. |
+| `scripts/make-icon.swift` | Draws the app icon (`Resources/AppIcon.icns` is built from it). |
 
 ## Clean-room note
 

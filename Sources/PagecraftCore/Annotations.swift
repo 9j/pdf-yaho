@@ -127,6 +127,63 @@ public enum Annotations {
             .replacingOccurrences(of: "\n", with: " ")
     }
 
+    public static func isMarkup(_ a: PDFAnnotation) -> Bool {
+        ["Highlight", "Underline", "StrikeOut"].contains(a.type ?? "")
+    }
+
+    /// Annotations whose box can be resized by dragging a corner.
+    public static func isResizable(_ a: PDFAnnotation) -> Bool {
+        ["FreeText", "Square", "Circle", "Ink", "Line"].contains(a.type ?? "")
+    }
+
+    /// The colour the user perceives: text colour for text boxes, stroke colour otherwise.
+    public static func color(of a: PDFAnnotation) -> NSColor {
+        if a.type == "FreeText" { return a.fontColor ?? .black }
+        return a.color.withAlphaComponent(1)
+    }
+
+    public static func setColor(_ color: NSColor, of a: PDFAnnotation) {
+        if isRedaction(a) { return }
+        switch a.type ?? "" {
+        case "FreeText": a.fontColor = color
+        case "Highlight": a.color = color.withAlphaComponent(0.45)
+        default: a.color = color
+        }
+    }
+
+    /// Moves and scales an annotation into `newBounds`, scaling ink paths and line endpoints with it.
+    public static func resize(_ a: PDFAnnotation, to newBounds: CGRect) {
+        let old = a.bounds
+        guard old.width > 0, old.height > 0, newBounds.width > 0, newBounds.height > 0 else { a.bounds = newBounds; return }
+        let sx = newBounds.width / old.width, sy = newBounds.height / old.height
+        switch a.type ?? "" {
+        case "Ink":
+            let paths = a.paths ?? []
+            for path in paths { a.remove(path) }
+            a.bounds = newBounds
+            for path in paths {
+                let scaled = path.copy() as! NSBezierPath
+                scaled.transform(using: AffineTransform(scaleByX: sx, byY: sy))
+                a.add(scaled)
+            }
+        case "Line":
+            let start = a.startPoint, end = a.endPoint
+            a.bounds = newBounds
+            a.startPoint = CGPoint(x: start.x * sx, y: start.y * sy)
+            a.endPoint = CGPoint(x: end.x * sx, y: end.y * sy)
+        default:
+            a.bounds = newBounds
+        }
+    }
+
+    /// A copy offset by `offset`, for Duplicate.
+    public static func duplicate(_ a: PDFAnnotation, offset: CGPoint = CGPoint(x: 12, y: -12)) -> PDFAnnotation? {
+        guard let copy = a.copy() as? PDFAnnotation else { return nil }
+        copy.bounds = a.bounds.offsetBy(dx: offset.x, dy: offset.y)
+        if let paths = a.paths, copy.paths?.isEmpty ?? true { paths.forEach { copy.add($0.copy() as! NSBezierPath) } }
+        return copy
+    }
+
     static func border(_ width: CGFloat) -> PDFBorder {
         let b = PDFBorder()
         b.lineWidth = width
