@@ -11,6 +11,8 @@ final class PDFFile: ReferenceFileDocument {
     var userPassword: String?
     /// Password that guards permissions; defaults to the open password.
     var ownerPassword: String?
+    /// Page labels (i, ii, 1, 2, A-1…). PDFKit drops them on save, so they are kept here and written back.
+    var pageLabels: [PageLabelRange] = []
 
     init() {
         pdf = PDFDocument()
@@ -22,12 +24,14 @@ final class PDFFile: ReferenceFileDocument {
             throw CocoaError(.fileReadCorruptFile)
         }
         pdf = doc
+        pageLabels = PageLabels.read(from: doc)
         // Callouts and clouds come back from disk as plain stamps; make them editable again.
         for page in PDFOps.pages(of: doc) { Annotations.restoreCustomAnnotations(on: page) }
     }
 
     func snapshot(contentType: UTType) throws -> Data {
-        let options = PDFOps.WriteOptions(userPassword: userPassword, ownerPassword: ownerPassword)
+        let options = PDFOps.WriteOptions(userPassword: userPassword, ownerPassword: ownerPassword,
+                                          pageLabels: pageLabels.isEmpty ? nil : pageLabels)
         guard let data = PDFOps.data(pdf, options: options) else { throw CocoaError(.fileWriteUnknown) }
         return data
     }

@@ -11,7 +11,8 @@ enum Exporter {
     /// Options that keep the document's own password protection on every copy.
     private static func options(_ editor: EditorController, flatten: Bool = false, compression: PDFOps.Compression? = nil) -> PDFOps.WriteOptions {
         PDFOps.WriteOptions(flatten: flatten, compression: compression,
-                            userPassword: editor.file.userPassword, ownerPassword: editor.file.ownerPassword)
+                            userPassword: editor.file.userPassword, ownerPassword: editor.file.ownerPassword,
+                            pageLabels: editor.file.pageLabels.isEmpty ? nil : editor.file.pageLabels)
     }
 
     static func flattened(_ editor: EditorController) {

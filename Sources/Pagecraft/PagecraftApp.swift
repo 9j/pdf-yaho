@@ -233,6 +233,7 @@ struct PagecraftCommands: Commands {
                 Button("Split Book Spreads") { editor?.splitSpreads() }
                 Button("Reset Crop") { editor?.resetCrop() }
                 Button("Page Size…") { editor?.showPageSize = true }
+                Button("Page Labels…") { editor?.showPageLabels = true }
                 Divider()
                 Button("Extract…") { editor.map { Exporter.extract($0, indices: $0.targetPageIndices) } }
                 Button("Split…") { editor?.showSplit = true }

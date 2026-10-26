@@ -65,7 +65,7 @@ struct ThumbnailList: View {
                                     }
                                 }
                         }
-                        Text("\(index + 1)")
+                        Text(editor.pageLabel(index))
                             .font(.caption.weight(current ? .semibold : .regular))
                             .monospacedDigit()
                             .foregroundStyle(current ? Color.accentColor : .secondary)

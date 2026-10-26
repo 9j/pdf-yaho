@@ -126,7 +126,7 @@ private struct PageCell: View {
                 }
             }
             .frame(height: size * 1.35 + 10, alignment: .bottom)
-            Text("\(index + 1)")
+            Text(editor.pageLabel(index))
                 .font(.callout.weight(selected ? .semibold : .regular))
                 .monospacedDigit()
                 .foregroundStyle(selected ? .white : .secondary)
@@ -214,6 +214,7 @@ private struct PagesActionBar: View {
                 Button("Clear Margins") { editor.autoCrop() }.disabled(count == 0)
                 Button("Page Size…") { editor.showPageSize = true }
                 Button("Split Document…") { editor.showSplit = true }
+                Button("Page Labels…") { editor.showPageLabels = true }
                 Divider()
                 Button("Page Numbers…") { editor.headerFooterPreset = .pageNumbers }
                 Button("Header & Footer…") { editor.headerFooterPreset = .custom }

@@ -217,8 +217,11 @@ public enum PDFOps {
         public var performOCR = false
         public var userPassword: String?
         public var ownerPassword: String?
+        /// Page labels to write; nil keeps whatever PDFKit writes.
+        public var pageLabels: [PageLabelRange]?
         public init(flatten: Bool = false, compression: Compression? = nil, performOCR: Bool = false,
-                    userPassword: String? = nil, ownerPassword: String? = nil) {
+                    userPassword: String? = nil, ownerPassword: String? = nil, pageLabels: [PageLabelRange]? = nil) {
+            self.pageLabels = pageLabels
             self.flatten = flatten
             self.compression = compression
             self.performOCR = performOCR
@@ -249,11 +252,18 @@ public enum PDFOps {
 
     @discardableResult
     public static func write(_ doc: PDFDocument, to url: URL, options: WriteOptions = WriteOptions()) -> Bool {
-        doc.write(to: url, withOptions: options.dictionary)
+        guard options.pageLabels != nil else { return doc.write(to: url, withOptions: options.dictionary) }
+        guard let data = data(doc, options: options) else { return false }
+        return (try? data.write(to: url, options: .atomic)) != nil
     }
 
     public static func data(_ doc: PDFDocument, options: WriteOptions = WriteOptions()) -> Data? {
-        doc.dataRepresentation(options: options.dictionary)
+        guard let labels = options.pageLabels else { return doc.dataRepresentation(options: options.dictionary) }
+        // PDFKit drops page labels when it writes, so they go in as an incremental update afterwards.
+        var base = options
+        base.pageLabels = nil
+        guard let data = data(doc, options: base) else { return nil }
+        return PageLabels.apply(labels, to: data, password: options.userPassword ?? "")
     }
 
     /// A Quartz filter like the system "Reduce File Size", with the preset's quality and resolution.

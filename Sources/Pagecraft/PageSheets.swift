@@ -173,3 +173,140 @@ struct HeaderFooterSheet: View {
         }
     }
 }
+
+/// Edits page label ranges: from page N on, number pages in a style with a prefix (e.g. i, ii … then 1, 2 …).
+struct PageLabelsSheet: View {
+    @ObservedObject var editor: EditorController
+    @State private var ranges: [Row] = []
+    @Environment(\.dismiss) private var dismiss
+
+    struct Row: Identifiable, Equatable {
+        let id = UUID()
+        var range: PageLabelRange
+    }
+
+    private var sorted: [PageLabelRange] { ranges.map(\.range).sorted { $0.startPage < $1.startPage } }
+    private var duplicateStart: Bool { Set(ranges.map(\.range.startPage)).count != ranges.count }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            SheetHeader(symbol: "textformat.123", title: "Page Labels",
+                        subtitle: "Number pages the way they are printed, such as i, ii for the front matter and 1, 2 from chapter one.")
+            VStack(spacing: 0) {
+                HStack(spacing: 10) {
+                    Text("From page").frame(width: 80, alignment: .leading)
+                    Text("Style").frame(width: 130, alignment: .leading)
+                    Text("Prefix").frame(width: 90, alignment: .leading)
+                    Text("Start at").frame(width: 60, alignment: .leading)
+                    Spacer()
+                }
+                .font(.caption).foregroundStyle(.secondary)
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                Divider()
+                ScrollView {
+                    VStack(spacing: 6) {
+                        ForEach($ranges) { $row in rangeRow($row) }
+                        if ranges.isEmpty {
+                            Text("No labels — pages show their numbers.").foregroundStyle(.secondary).padding(.vertical, 16)
+                        }
+                    }
+                    .padding(10)
+                }
+                .frame(height: 170)
+                Divider()
+                HStack {
+                    Button { addRange() } label: { Label("Add Range", systemImage: "plus") }
+                        .buttonStyle(.borderless)
+                        .disabled(ranges.count >= editor.pageCount)
+                    Spacer()
+                    if duplicateStart {
+                        Label("Two ranges start on the same page", systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption).foregroundStyle(.orange)
+                    }
+                }
+                .padding(10)
+            }
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.08)))
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Preview").font(.caption).foregroundStyle(.secondary)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(0..<min(editor.pageCount, 40), id: \.self) { index in
+                            VStack(spacing: 2) {
+                                Text(PageLabels.label(forPage: index, in: sorted) ?? "\(index + 1)")
+                                    .font(.callout.weight(.medium)).lineLimit(1)
+                                Text("\(index + 1)").font(.caption2).foregroundStyle(.tertiary)
+                            }
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.06)))
+                        }
+                    }
+                }
+            }
+
+            HStack {
+                Button("Remove All", role: .destructive) { ranges = [] }
+                    .disabled(ranges.isEmpty)
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Apply") {
+                    let result = sorted
+                    dismiss()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { editor.setPageLabels(result) }
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(duplicateStart)
+            }
+        }
+        .padding(22)
+        .frame(width: 560)
+        .onAppear {
+            ranges = editor.pageLabels.map { Row(range: $0) }
+            if ranges.isEmpty { ranges = [Row(range: PageLabelRange(startPage: 0, style: .decimal))] }
+        }
+    }
+
+    private func rangeRow(_ row: Binding<Row>) -> some View {
+        HStack(spacing: 10) {
+            TextField("", value: Binding(get: { row.wrappedValue.range.startPage + 1 },
+                                         set: { row.wrappedValue.range.startPage = min(max($0, 1), editor.pageCount) - 1 }),
+                      format: .number)
+                .frame(width: 50)
+                .accessibilityLabel("From page")
+            Text("–\(endPage(of: row.wrappedValue.range))").foregroundStyle(.secondary).monospacedDigit().frame(width: 22, alignment: .leading)
+            Picker("Style", selection: row.range.style) {
+                ForEach(PageLabelRange.Style.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            .labelsHidden().frame(width: 130)
+            TextField("None", text: row.range.prefix).frame(width: 90).accessibilityLabel("Prefix")
+            TextField("", value: Binding(get: { row.wrappedValue.range.firstNumber },
+                                         set: { row.wrappedValue.range.firstNumber = max(1, $0) }),
+                      format: .number)
+                .frame(width: 60)
+                .disabled(row.wrappedValue.range.style == .none)
+                .accessibilityLabel("Start at")
+            Spacer()
+            Button { ranges.removeAll { $0.id == row.wrappedValue.id } } label: { Image(systemName: "minus.circle.fill") }
+                .buttonStyle(.borderless).foregroundStyle(.secondary)
+                .help("Remove this range")
+        }
+        .textFieldStyle(.roundedBorder)
+    }
+
+    /// The last page (1-based) a range covers before the next one starts.
+    private func endPage(of range: PageLabelRange) -> Int {
+        let next = sorted.map(\.startPage).filter { $0 > range.startPage }.min()
+        return next ?? editor.pageCount
+    }
+
+    /// Adds a range at the selected page, or after the last range.
+    private func addRange() {
+        let taken = Set(ranges.map(\.range.startPage))
+        let preferred = editor.targetPageIndices.first.flatMap { taken.contains($0) ? nil : $0 }
+        let start = preferred ?? (0..<editor.pageCount).first { !taken.contains($0) && $0 > (taken.max() ?? -1) }
+            ?? (0..<editor.pageCount).first { !taken.contains($0) } ?? 0
+        ranges.append(Row(range: PageLabelRange(startPage: start, style: .decimal)))
+    }
+}

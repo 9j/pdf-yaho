@@ -195,6 +195,7 @@ private struct MoreSheets: ViewModifier {
         content
             .sheet(isPresented: $editor.showPageSize) { PageSizeSheet(editor: editor) }
             .sheet(isPresented: $editor.showSplit) { SplitSheet(editor: editor) }
+            .sheet(isPresented: $editor.showPageLabels) { PageLabelsSheet(editor: editor) }
             .sheet(isPresented: $editor.showLinkSheet) { LinkSheet(editor: editor) }
             .sheet(isPresented: $editor.showFindRedact) { FindRedactSheet(editor: editor) }
             .sheet(isPresented: $editor.showMeasureScale) { MeasureScaleSheet(editor: editor) }

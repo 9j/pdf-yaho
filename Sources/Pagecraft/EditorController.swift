@@ -485,6 +485,7 @@ final class EditorController: ObservableObject {
     @Published var showExportImages = false
     @Published var showPageSize = false
     @Published var showSplit = false
+    @Published var showPageLabels = false
     @Published var headerFooterPreset: HeaderFooterPreset?
     /// Rectangle being drawn with the Crop tool, in page space.
     @Published var cropDraft: (page: PDFPage, rect: CGRect)? { didSet { overlayTick += 1 } }
@@ -1878,9 +1879,38 @@ final class EditorController: ObservableObject {
     func unlock(with password: String) -> Bool {
         guard document.unlock(withPassword: password) else { return false }
         file.userPassword = password
+        if file.pageLabels.isEmpty { file.pageLabels = PageLabels.read(from: document) }
         needsPassword = false
         changed()
         return true
+    }
+
+    // MARK: Page labels
+
+    var pageLabels: [PageLabelRange] { file.pageLabels }
+    var hasPageLabels: Bool { !file.pageLabels.isEmpty }
+
+    /// The label printed for a page ("iii", "A-5"), or its number when the document has no labels.
+    func pageLabel(_ index: Int) -> String {
+        hasPageLabels ? PageLabels.label(forPage: index, in: file.pageLabels) ?? "\(index + 1)" : "\(index + 1)"
+    }
+
+    /// The page whose label or number is `text`; labels win, so "ii" and "5" both work.
+    func pageIndex(forLabel text: String) -> Int? {
+        let wanted = text.trimmingCharacters(in: .whitespaces)
+        if hasPageLabels, let match = (0..<pageCount).first(where: { pageLabel($0).caseInsensitiveCompare(wanted) == .orderedSame }) {
+            return match
+        }
+        return Int(wanted).map { $0 - 1 }
+    }
+
+    func setPageLabels(_ ranges: [PageLabelRange]) {
+        let previous = file.pageLabels
+        guard ranges != previous else { return }
+        file.pageLabels = ranges.sorted { $0.startPage < $1.startPage }
+        registerUndo(ranges.isEmpty ? "Remove Page Labels" : "Page Labels") { $0.setPageLabels(previous) }
+        objectWillChange.send()
+        showToast(ranges.isEmpty ? "Page labels removed" : "Page labels updated")
     }
 
     // MARK: Protection and OCR

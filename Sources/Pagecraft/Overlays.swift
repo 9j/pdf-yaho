@@ -325,14 +325,15 @@ struct PageHUD: View {
                 .textFieldStyle(.plain)
                 .multilineTextAlignment(.center)
                 .monospacedDigit()
-                .frame(width: 34, height: 22)
+                .frame(width: editor.hasPageLabels ? 52 : 34, height: 22)
                 .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(pageFocused ? 0.1 : 0.05)))
                 .focused($pageFocused)
                 .onSubmit {
-                    if let n = Int(pageText) { editor.goToPage(n - 1) }
+                    if let index = editor.pageIndex(forLabel: pageText) { editor.goToPage(index) }
                     pageFocused = false
                 }
-            Text("of \(editor.pageCount)").foregroundStyle(.secondary).monospacedDigit()
+            Text(editor.hasPageLabels ? "(\(editor.currentPageIndex + 1) of \(editor.pageCount))" : "of \(editor.pageCount)")
+                .foregroundStyle(.secondary).monospacedDigit()
             BarButton(symbol: "chevron.down", label: "Next Page") { editor.goToPage(editor.currentPageIndex + 1) }
                 .disabled(editor.currentPageIndex + 1 >= editor.pageCount)
             Divider().frame(height: 18).padding(.horizontal, 4)
@@ -358,9 +359,10 @@ struct PageHUD: View {
         .frame(height: 38)
         .floatingChrome(Capsule())
         .onHover { editor.hudHovered = $0 }
-        .onAppear { pageText = "\(editor.currentPageIndex + 1)" }
-        .onChange(of: editor.currentPageIndex) { _, index in if !pageFocused { pageText = "\(index + 1)" } }
-        .onChange(of: pageFocused) { _, focused in if !focused { pageText = "\(editor.currentPageIndex + 1)" } }
+        .onAppear { pageText = editor.pageLabel(editor.currentPageIndex) }
+        .onChange(of: editor.currentPageIndex) { _, index in if !pageFocused { pageText = editor.pageLabel(index) } }
+        .onChange(of: pageFocused) { _, focused in if !focused { pageText = editor.pageLabel(editor.currentPageIndex) } }
+        .onChange(of: editor.pageLabels) { _, _ in if !pageFocused { pageText = editor.pageLabel(editor.currentPageIndex) } }
         .onChange(of: editor.focusPageField) { _, focus in
             if focus { pageFocused = true; editor.focusPageField = false }
         }
