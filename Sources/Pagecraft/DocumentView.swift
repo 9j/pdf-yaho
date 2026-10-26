@@ -95,29 +95,54 @@ struct DocumentView: View {
             WelcomeWindowController.shared.close()
         }
         .onChange(of: undoManager) { _, manager in editor.undoManager = manager }
-        .sheet(isPresented: $editor.showSignaturePad) { SignaturePad(editor: editor) }
-        .sheet(isPresented: $editor.showProperties) { PropertiesView(editor: editor) }
-        .sheet(isPresented: $editor.showPasswordSheet) { PasswordSheet(editor: editor) }
-        .sheet(isPresented: $editor.showReduceSize) { ReduceSizeSheet(editor: editor) }
-        .sheet(isPresented: $editor.showExportImages) { ExportImagesSheet(editor: editor) }
-        .sheet(isPresented: $editor.showPageSize) { PageSizeSheet(editor: editor) }
-        .sheet(isPresented: $editor.showSplit) { SplitSheet(editor: editor) }
-        .sheet(item: $editor.headerFooterPreset) { preset in HeaderFooterSheet(editor: editor, preset: preset) }
-        .overlay {
-            if let message = editor.busy {
-                ZStack {
-                    Color.black.opacity(0.15)
-                    VStack(spacing: 12) {
-                        ProgressView().controlSize(.large)
-                        Text(message).font(.callout)
-                    }
-                    .padding(24)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                }
-                .ignoresSafeArea()
+        .modifier(DocumentSheets(editor: editor))
+    }
+}
+
+/// Every sheet a document window can show, plus the blocking progress overlay.
+private struct DocumentSheets: ViewModifier {
+    @ObservedObject var editor: EditorController
+
+    func body(content: Content) -> some View {
+        content
+            .sheet(isPresented: $editor.showSignaturePad) { SignaturePad(editor: editor) }
+            .sheet(isPresented: $editor.showProperties) { PropertiesView(editor: editor) }
+            .sheet(isPresented: $editor.showPasswordSheet) { PasswordSheet(editor: editor) }
+            .sheet(isPresented: $editor.showReduceSize) { ReduceSizeSheet(editor: editor) }
+            .sheet(isPresented: $editor.showExportImages) { ExportImagesSheet(editor: editor) }
+            .modifier(MoreSheets(editor: editor))
+            .overlay { if let message = editor.busy { BusyOverlay(message: message) } }
+    }
+}
+
+private struct MoreSheets: ViewModifier {
+    @ObservedObject var editor: EditorController
+
+    func body(content: Content) -> some View {
+        content
+            .sheet(isPresented: $editor.showPageSize) { PageSizeSheet(editor: editor) }
+            .sheet(isPresented: $editor.showSplit) { SplitSheet(editor: editor) }
+            .sheet(isPresented: $editor.showLinkSheet) { LinkSheet(editor: editor) }
+            .sheet(isPresented: $editor.showFindRedact) { FindRedactSheet(editor: editor) }
+            .sheet(item: $editor.headerFooterPreset) { preset in HeaderFooterSheet(editor: editor, preset: preset) }
+            .sheet(isPresented: $editor.needsPassword) { UnlockView(editor: editor) }
+    }
+}
+
+private struct BusyOverlay: View {
+    let message: String
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.15)
+            VStack(spacing: 12) {
+                ProgressView().controlSize(.large)
+                Text(message).font(.callout)
             }
+            .padding(24)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
-        .sheet(isPresented: $editor.needsPassword) { UnlockView(editor: editor) }
+        .ignoresSafeArea()
     }
 }
 
@@ -223,73 +248,5 @@ struct PropertiesView: View {
             keywords = (attributes[PDFDocumentAttribute.keywordsAttribute] as? [String])?.joined(separator: ", ")
                 ?? attributes[PDFDocumentAttribute.keywordsAttribute] as? String ?? ""
         }
-    }
-}
-
-struct SignaturePad: View {
-    @ObservedObject var editor: EditorController
-    @Environment(\.dismiss) private var dismiss
-    @State private var strokes: [[CGPoint]] = []
-    private let size = CGSize(width: 480, height: 200)
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            SheetHeader(symbol: "signature", title: "Your signature",
-                        subtitle: "Draw with your trackpad or mouse. It is saved on this Mac only.")
-            ZStack(alignment: .bottomLeading) {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(.white)
-                    .shadow(color: .black.opacity(0.08), radius: 3, y: 1)
-                VStack(spacing: 4) {
-                    Spacer()
-                    HStack(spacing: 6) {
-                        Image(systemName: "xmark").font(.caption).foregroundStyle(.gray)
-                        Rectangle().fill(.gray.opacity(0.4)).frame(height: 1)
-                    }
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 44)
-                }
-                if strokes.isEmpty {
-                    Text("Sign here").font(.title3).foregroundStyle(.gray.opacity(0.6))
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-                Canvas { context, _ in
-                    for stroke in strokes where !stroke.isEmpty {
-                        var path = Path()
-                        path.addLines(stroke)
-                        context.stroke(path, with: .color(Color(white: 0.1)),
-                                       style: StrokeStyle(lineWidth: 2.6, lineCap: .round, lineJoin: .round))
-                    }
-                }
-                .gesture(DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        if value.translation == .zero { strokes.append([value.location]) }
-                        else if !strokes.isEmpty { strokes[strokes.count - 1].append(value.location) }
-                    })
-            }
-            .frame(width: size.width, height: size.height)
-            .environment(\.colorScheme, .light)
-            HStack {
-                Button("Clear") { strokes = [] }.disabled(strokes.isEmpty)
-                if SignatureStore.load() != nil {
-                    Button("Delete Saved", role: .destructive) { SignatureStore.save(nil); dismiss() }
-                }
-                Spacer()
-                Button("Cancel") {
-                    if SignatureStore.load() == nil, editor.tool == .signature { editor.tool = .select }
-                    dismiss()
-                }
-                .keyboardShortcut(.cancelAction)
-                Button("Save Signature") {
-                    SignatureStore.save(Signature(viewStrokes: strokes, viewHeight: size.height))
-                    editor.tool = .signature
-                    editor.showToast("Signature saved — click a page to place it")
-                    dismiss()
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(strokes.isEmpty)
-            }
-        }
-        .padding(22)
     }
 }

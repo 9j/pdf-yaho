@@ -2,7 +2,7 @@ import AppKit
 import PDFKit
 
 public enum ShapeKind: String, CaseIterable, Sendable {
-    case rectangle, oval, line, arrow
+    case rectangle, oval, line, arrow, doubleArrow
 }
 
 /// Factories for the annotation types the editor creates. All geometry is in page space.
@@ -47,13 +47,14 @@ public enum Annotations {
             a.color = color
             a.border = border(lineWidth)
             return a
-        case .line, .arrow:
+        case .line, .arrow, .doubleArrow:
             let pad = lineWidth * 4 + 4
             let bounds = rect.insetBy(dx: -pad, dy: -pad)
             let a = PDFAnnotation(bounds: bounds, forType: .line, withProperties: nil)
             a.startPoint = start - bounds.origin
             a.endPoint = end - bounds.origin
-            a.endLineStyle = kind == .arrow ? .openArrow : .none
+            a.endLineStyle = kind == .line ? .none : .openArrow
+            a.startLineStyle = kind == .doubleArrow ? .openArrow : .none
             a.color = color
             a.border = border(lineWidth)
             return a
@@ -114,7 +115,8 @@ public enum Annotations {
         case "Text": return "Note"
         case "Square": return "Rectangle"
         case "Circle": return "Oval"
-        case "Line": return a.endLineStyle == .none ? "Line" : "Arrow"
+        case "Line": return a.endLineStyle == .none ? "Line" : a.startLineStyle == .none ? "Arrow" : "Double Arrow"
+        case "Link": return "Link"
         case "Stamp": return "Stamp"
         default: return a.type ?? "Annotation"
         }

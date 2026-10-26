@@ -149,6 +149,24 @@ struct AnnotationContextBar: View {
                 if Annotations.isMovable(a) {
                     BarButton(symbol: "plus.square.on.square", label: "Duplicate") { editor.duplicateSelected() }
                 }
+                if a.type == "Link" {
+                    Text(a.url?.absoluteString ?? a.destination?.page.map { "Page \(editor.document.index(for: $0) + 1)" } ?? "Link")
+                        .lineLimit(1).font(.callout).foregroundStyle(.secondary).frame(maxWidth: 220).padding(.horizontal, 6)
+                }
+                Menu {
+                    Button("Copy") { editor.copySelectedAnnotation() }
+                    Button("Cut") { editor.copySelectedAnnotation(cut: true) }
+                    Divider()
+                    Button("Bring to Front") { editor.reorderSelected(toFront: true) }
+                    Button("Send to Back") { editor.reorderSelected(toFront: false) }
+                } label: {
+                    Image(systemName: "ellipsis").font(.system(size: 13, weight: .medium)).frame(width: 30, height: 28)
+                }
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("More")
                 Divider().frame(height: 18).padding(.horizontal, 2)
                 BarButton(symbol: "trash", label: "Delete", role: .destructive) { editor.deleteSelected() }
             }

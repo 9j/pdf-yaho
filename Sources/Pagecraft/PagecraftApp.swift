@@ -42,6 +42,7 @@ struct PagecraftApp: App {
         }
         .defaultSize(width: 1280, height: 920)
         .commands { PagecraftCommands() }
+        Settings { SettingsView() }
     }
 }
 
@@ -151,8 +152,13 @@ struct PagecraftCommands: Commands {
                 Button(tool.label) { editor?.tool = tool }
             }
             Divider()
-            Button("Edit Signature…") { editor?.showSignaturePad = true }
+            Button("New Signature…") { editor?.signaturePadInitials = false; editor?.showSignaturePad = true }
+            Button("New Initials…") { editor?.signaturePadInitials = true; editor?.showSignaturePad = true }
+            Divider()
+            Button("Find and Redact…") { editor?.showFindRedact = true }.keyboardShortcut("f", modifiers: [.command, .shift])
             Button("Apply Redactions…") { editor?.applyRedactions() }
+            Divider()
+            Button("Clear Form") { editor?.resetForm() }
             Divider()
             Button("Remove All Annotations") { editor?.removeAllAnnotations() }
         }

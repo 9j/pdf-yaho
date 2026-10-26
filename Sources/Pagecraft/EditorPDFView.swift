@@ -13,6 +13,9 @@ final class EditorPDFView: PDFView {
         case crop(page: PDFPage, start: CGPoint)
     }
 
+    /// Vertices placed so far with the Polygon or Polyline tool.
+    private var points: (page: PDFPage, list: [CGPoint])?
+
     private var drag: Drag?
     private var preview: PDFAnnotation?
     private var inline: InlineTextEditor?
@@ -41,8 +44,11 @@ final class EditorPDFView: PDFView {
     /// Topmost user annotation under the point, with a little slack for thin shapes.
     private func hit(_ point: CGPoint, on page: PDFPage) -> PDFAnnotation? {
         let slack = 4 / max(scaleFactor, 0.1)
+        // Links are followed when reading and edited in Markup mode.
+        let editing = editor?.mode == .markup
         return page.annotations.reversed().first {
-            Annotations.isUserEditable($0) && $0.bounds.insetBy(dx: -slack, dy: -slack).contains(point)
+            (Annotations.isUserEditable($0) || (editing && ["Link", "Widget"].contains($0.type ?? "")))
+                && $0.bounds.insetBy(dx: -slack, dy: -slack).contains(point)
         }
     }
 
@@ -75,7 +81,7 @@ final class EditorPDFView: PDFView {
             }
             super.mouseMoved(with: event)
         case .text: NSCursor.iBeam.set()
-        case .eraser, .note, .signature: NSCursor.pointingHand.set()
+        case .eraser, .note, .signature, .stamp, .checkmark, .cross, .date: NSCursor.pointingHand.set()
         default: NSCursor.crosshair.set()
         }
     }
@@ -120,15 +126,53 @@ final class EditorPDFView: PDFView {
             beginNewNote(at: point, on: page)
         case .signature:
             editor.placeSignature(at: point, on: page)
+        case .checkmark, .cross, .date:
+            editor.placeMark(editor.tool, at: point, on: page)
+        case .stamp:
+            editor.placeStamp(at: point, on: page)
         case .eraser:
             if let a = hit(point, on: page) { editor.erase(a, on: page) }
-        case .pen, .rectangle, .oval, .line, .arrow, .redact:
+        case .polygon, .polyline:
+            editor.select(nil)
+            addPoint(point, on: page, finish: event.clickCount >= 2)
+        case .pen, .marker, .rectangle, .oval, .line, .arrow, .doubleArrow, .redact, .link, .image, .snapshot,
+             .formText, .formCheckbox, .formRadio, .formChoice:
             editor.select(nil)
             drag = .draw(page: page, start: point, stroke: [point])
         case .crop:
             drag = .crop(page: page, start: point)
             editor.cropDraft = nil
         }
+    }
+
+    // MARK: Polygon and polyline
+
+    private func addPoint(_ point: CGPoint, on page: PDFPage, finish: Bool) {
+        guard let editor else { return }
+        if points?.page !== page { points = (page, []) }
+        if !finish { points?.list.append(point) }
+        let list = points?.list ?? []
+        if finish {
+            finishPointTool()
+            return
+        }
+        showPreview(Annotations.polyline(list, closed: false, color: editor.strokeColor(for: editor.tool),
+                                         lineWidth: editor.style(for: editor.tool).width), on: page)
+    }
+
+    /// Commits the points placed so far (needs at least two, three for a polygon).
+    func finishPointTool() {
+        guard let editor, let (page, list) = points else { return }
+        points = nil
+        showPreview(nil, on: nil)
+        let closed = editor.tool == .polygon
+        if list.count >= (closed ? 3 : 2) { editor.commitPolyline(list, closed: closed, on: page) }
+    }
+
+    func cancelPointTool() {
+        guard points != nil else { return }
+        points = nil
+        showPreview(nil, on: nil)
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -179,9 +223,21 @@ final class EditorPDFView: PDFView {
             showPreview(nil, on: nil)
             guard let (_, point, _) = pagePoint(event, page: page) else { return }
             let large = abs(point.x - start.x) > 3 || abs(point.y - start.y) > 3
-            if large || editor.tool == .pen, let a = makeAnnotation(editor, from: start, to: point, stroke: stroke) {
-                editor.add(a, to: page)
-                if editor.tool == .redact { editor.select(SelectedAnnotation(annotation: a, page: page)) }
+            let rect = CGRect(x: min(start.x, point.x), y: min(start.y, point.y), width: abs(point.x - start.x), height: abs(point.y - start.y))
+            switch editor.tool {
+            case .image:
+                DispatchQueue.main.async { editor.placeImage(in: large ? rect : CGRect(origin: point, size: .zero), on: page) }
+            case .link:
+                if large { DispatchQueue.main.async { editor.requestLink(in: rect, on: page) } }
+            case .snapshot:
+                if large { editor.snapshot(rect, on: page) }
+            case .formText, .formCheckbox, .formRadio, .formChoice:
+                if let kind = editor.tool.formKind { editor.addFormField(kind, in: large ? rect : CGRect(origin: point, size: .zero), on: page) }
+            default:
+                if large || Tool.pens.contains(editor.tool), let a = makeAnnotation(editor, from: start, to: point, stroke: stroke) {
+                    editor.add(a, to: page)
+                    if editor.tool == .redact { editor.select(SelectedAnnotation(annotation: a, page: page)) }
+                }
             }
         case nil:
             super.mouseUp(with: event)
@@ -195,16 +251,30 @@ final class EditorPDFView: PDFView {
     }
 
     private func makeAnnotation(_ editor: EditorController, from start: CGPoint, to point: CGPoint, stroke: [CGPoint]) -> PDFAnnotation? {
-        let style = editor.style(for: editor.tool)
-        switch editor.tool {
-        case .pen:
-            return Annotations.ink(strokes: [stroke], color: style.color, lineWidth: style.width)
+        let tool = editor.tool
+        let style = editor.style(for: tool)
+        let rect = CGRect(x: min(start.x, point.x), y: min(start.y, point.y), width: abs(point.x - start.x), height: abs(point.y - start.y))
+        switch tool {
+        case .pen, .marker:
+            return Annotations.ink(strokes: [stroke], color: editor.strokeColor(for: tool), lineWidth: style.width)
         case .redact:
-            return Annotations.redaction(bounds: CGRect(x: min(start.x, point.x), y: min(start.y, point.y),
-                                                        width: abs(point.x - start.x), height: abs(point.y - start.y)))
+            return Annotations.redaction(bounds: rect, style: editor.redactionStyle)
+        case .link, .image, .snapshot, .formText, .formCheckbox, .formRadio, .formChoice:
+            let a = PDFAnnotation(bounds: rect, forType: .square, withProperties: nil)
+            a.color = .controlAccentColor
+            let border = PDFBorder()
+            border.lineWidth = 1
+            border.style = .dashed
+            border.dashPattern = [4, 3]
+            a.border = border
+            a.interiorColor = NSColor.controlAccentColor.withAlphaComponent(0.08)
+            return a
         default:
-            guard let shape = editor.tool.shape else { return nil }
-            return Annotations.shape(shape, from: start, to: point, color: style.color, lineWidth: style.width)
+            guard let shape = tool.shape else { return nil }
+            let a = Annotations.shape(shape, from: start, to: point, color: editor.strokeColor(for: tool), lineWidth: style.width)
+            Annotations.setLineStyle(style.dash, of: a)
+            if tool.usesFill, let fill = style.fill { a.interiorColor = fill.withAlphaComponent(style.opacity) }
+            return a
         }
     }
 
@@ -224,10 +294,14 @@ final class EditorPDFView: PDFView {
             editor.deleteSelected()
             return
         case 53:
-            if editor.tool == .crop { editor.cropDraft = nil; editor.tool = .select }
+            if points != nil { cancelPointTool() }
+            else if editor.tool == .crop { editor.cropDraft = nil; editor.tool = .select }
             else if editor.selected != nil { editor.select(nil) }
             else if editor.textSelectionActive { clearSelection(); editor.textSelectionActive = false }
             else if editor.tool != .select { editor.tool = .select }
+            return
+        case 36 where points != nil:
+            finishPointTool()
             return
         case 36 where editor.cropDraft != nil:
             editor.applyCrop(toAll: false)
@@ -249,6 +323,33 @@ final class EditorPDFView: PDFView {
             return
         }
         super.keyDown(with: event)
+    }
+
+    // MARK: Clipboard
+
+    @objc override func copy(_ sender: Any?) {
+        if let editor, editor.selected != nil { editor.copySelectedAnnotation() } else { super.copy(sender) }
+    }
+
+    @objc func cut(_ sender: Any?) {
+        editor?.copySelectedAnnotation(cut: true)
+    }
+
+    @objc func paste(_ sender: Any?) {
+        if editor?.paste() != true { NSSound.beep() }
+    }
+
+    @objc func delete(_ sender: Any?) {
+        editor?.deleteSelected()
+    }
+
+    @objc func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        switch item.action {
+        case #selector(cut(_:)), #selector(delete(_:)): return editor?.selected != nil
+        case #selector(paste(_:)): return editor?.annotationClipboard != nil || NSImage.canInit(with: .general)
+        case #selector(copy(_:)): return editor?.selected != nil || !(currentSelection?.string ?? "").isEmpty
+        default: return true
+        }
     }
 
     // MARK: Inline text editing

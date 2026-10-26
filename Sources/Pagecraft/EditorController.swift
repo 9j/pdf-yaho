@@ -16,7 +16,11 @@ enum EditorMode: String, CaseIterable, Identifiable {
 }
 
 enum Tool: String, CaseIterable, Identifiable {
-    case select, highlight, underline, strikeout, pen, text, note, rectangle, oval, line, arrow, signature, redact, eraser, crop
+    case select, highlight, underline, strikeout, pen, marker, text, note
+    case rectangle, oval, line, arrow, doubleArrow, polygon, polyline
+    case signature, checkmark, cross, date, stamp, image, link
+    case formText, formCheckbox, formRadio, formChoice
+    case redact, eraser, crop, snapshot
 
     var id: String { rawValue }
 
@@ -27,16 +31,41 @@ enum Tool: String, CaseIterable, Identifiable {
         case .underline: "Underline"
         case .strikeout: "Strike"
         case .pen: "Pen"
+        case .marker: "Marker"
         case .text: "Text"
         case .note: "Note"
         case .rectangle: "Rectangle"
         case .oval: "Oval"
         case .line: "Line"
         case .arrow: "Arrow"
+        case .doubleArrow: "Double Arrow"
+        case .polygon: "Polygon"
+        case .polyline: "Polyline"
         case .signature: "Sign"
+        case .checkmark: "Checkmark"
+        case .cross: "Cross"
+        case .date: "Date"
+        case .stamp: "Stamp"
+        case .image: "Image"
+        case .link: "Link"
+        case .formText: "Text Field"
+        case .formCheckbox: "Checkbox"
+        case .formRadio: "Radio Button"
+        case .formChoice: "Drop-down"
         case .redact: "Redact"
         case .eraser: "Eraser"
         case .crop: "Crop"
+        case .snapshot: "Snapshot"
+        }
+    }
+
+    var formKind: Forms.FieldKind? {
+        switch self {
+        case .formText: .text
+        case .formCheckbox: .checkbox
+        case .formRadio: .radio
+        case .formChoice: .choice
+        default: nil
         }
     }
 
@@ -47,16 +76,31 @@ enum Tool: String, CaseIterable, Identifiable {
         case .underline: "underline"
         case .strikeout: "strikethrough"
         case .pen: "pencil.tip"
+        case .marker: "paintbrush.pointed"
         case .text: "character.textbox"
         case .note: "note.text"
         case .rectangle: "rectangle"
         case .oval: "circle"
         case .line: "line.diagonal"
         case .arrow: "arrow.up.right"
+        case .doubleArrow: "arrow.up.left.and.arrow.down.right"
+        case .polygon: "pentagon"
+        case .polyline: "point.topleft.down.to.point.bottomright.curvepath"
         case .signature: "signature"
+        case .checkmark: "checkmark"
+        case .cross: "xmark"
+        case .date: "calendar"
+        case .stamp: "seal"
+        case .image: "photo"
+        case .link: "link"
+        case .formText: "character.cursor.ibeam"
+        case .formCheckbox: "checkmark.square"
+        case .formRadio: "largecircle.fill.circle"
+        case .formChoice: "filemenu.and.selection"
         case .redact: "rectangle.inset.filled"
         case .eraser: "eraser"
         case .crop: "crop"
+        case .snapshot: "camera.viewfinder"
         }
     }
 
@@ -68,6 +112,7 @@ enum Tool: String, CaseIterable, Identifiable {
         case .underline: "u"
         case .strikeout: "k"
         case .pen: "p"
+        case .marker: "m"
         case .text: "t"
         case .note: "n"
         case .rectangle: "r"
@@ -75,9 +120,13 @@ enum Tool: String, CaseIterable, Identifiable {
         case .line: "l"
         case .arrow: "a"
         case .signature: "g"
+        case .stamp: "j"
+        case .image: "i"
         case .redact: "x"
         case .eraser: "e"
         case .crop: "c"
+        case .snapshot: "s"
+        default: nil
         }
     }
 
@@ -98,21 +147,43 @@ enum Tool: String, CaseIterable, Identifiable {
         case .oval: .oval
         case .line: .line
         case .arrow: .arrow
+        case .doubleArrow: .doubleArrow
         default: nil
         }
     }
 
-    static let shapes: [Tool] = [.rectangle, .oval, .line, .arrow]
+    static let shapes: [Tool] = [.rectangle, .oval, .line, .arrow, .doubleArrow, .polygon, .polyline]
+    static let pens: [Tool] = [.pen, .marker]
+    static let fillAndSign: [Tool] = [.signature, .checkmark, .cross, .date, .formText, .formCheckbox, .formRadio, .formChoice]
+    static let formFields: [Tool] = [.formText, .formCheckbox, .formRadio, .formChoice]
 
-    /// Tools whose look the user can tune with the colour and width controls.
-    var isStyled: Bool { ![.select, .eraser, .redact, .signature, .crop].contains(self) }
-    var usesWidth: Bool { self == .pen || shape != nil || self == .text }
+    var isShapeTool: Bool { Tool.shapes.contains(self) }
+    var isPointTool: Bool { self == .polygon || self == .polyline }
+    /// Tools that drag out a rectangle or stroke.
+    var drags: Bool { self == .pen || self == .marker || shape != nil || formKind != nil || [.redact, .crop, .snapshot, .link, .image].contains(self) }
+    /// Tools whose look the user can tune with the style controls.
+    var isStyled: Bool { [.highlight, .underline, .strikeout, .pen, .marker, .text, .note, .checkmark, .cross, .date].contains(self) || isShapeTool }
+    var usesWidth: Bool { [.pen, .marker, .text, .date].contains(self) || isShapeTool }
+    var usesFill: Bool { self == .rectangle || self == .oval || self == .polygon }
+    var usesDash: Bool { isShapeTool }
+    /// Tools that are part of document editing rather than annotation.
+    var isUtility: Bool { [.select, .crop, .snapshot].contains(self) }
 }
 
 struct ToolStyle: Equatable {
     var color: NSColor
-    /// Stroke width, or font size for the text tool.
+    /// Stroke width, or font size for text tools.
     var width: CGFloat
+    var opacity: CGFloat = 1
+    var fill: NSColor?
+    var dash: Annotations.LineStyle = .solid
+}
+
+/// What the Stamp tool places.
+enum StampChoice: Equatable {
+    case preset(StampPreset)
+    case image(NSImage)
+    case custom(String)
 }
 
 struct SelectedAnnotation: Equatable {
@@ -183,20 +254,35 @@ final class EditorController: ObservableObject {
 
     @Published var mode: EditorMode = .read { didSet { modeChanged(from: oldValue) } }
     @Published var tool: Tool = .select { didSet { toolChanged() } }
-    @Published var styles: [Tool: ToolStyle] = [
-        .highlight: ToolStyle(color: Palette.swatches[4], width: 0),
-        .underline: ToolStyle(color: Palette.swatches[7], width: 0),
-        .strikeout: ToolStyle(color: Palette.swatches[2], width: 0),
-        .pen: ToolStyle(color: Palette.swatches[7], width: 2),
-        .text: ToolStyle(color: Palette.swatches[0], width: 14),
-        .note: ToolStyle(color: Palette.swatches[4], width: 0),
-        .rectangle: ToolStyle(color: Palette.swatches[2], width: 2),
-        .oval: ToolStyle(color: Palette.swatches[2], width: 2),
-        .line: ToolStyle(color: Palette.swatches[2], width: 2),
-        .arrow: ToolStyle(color: Palette.swatches[2], width: 2),
-    ]
+    @Published var styles: [Tool: ToolStyle] = {
+        var styles: [Tool: ToolStyle] = [
+            .highlight: ToolStyle(color: Palette.swatches[4], width: 0),
+            .underline: ToolStyle(color: Palette.swatches[7], width: 0),
+            .strikeout: ToolStyle(color: Palette.swatches[2], width: 0),
+            .pen: ToolStyle(color: Palette.swatches[7], width: 2),
+            .marker: ToolStyle(color: Palette.swatches[4], width: 14, opacity: 0.45),
+            .text: ToolStyle(color: Palette.swatches[0], width: 14),
+            .note: ToolStyle(color: Palette.swatches[4], width: 0),
+            .checkmark: ToolStyle(color: Palette.swatches[7], width: 18),
+            .cross: ToolStyle(color: Palette.swatches[2], width: 18),
+            .date: ToolStyle(color: Palette.swatches[0], width: 12),
+        ]
+        for shape in Tool.shapes { styles[shape] = ToolStyle(color: Palette.swatches[2], width: 2) }
+        return styles
+    }()
+    @Published var stampChoice: StampChoice = .preset(StampPreset.all[0])
+    @Published var activeSignatureID: UUID?
+    @Published var signatureLibrary: [SavedSignature] = SignatureLibrary.load()
+    @Published var pendingLink: (page: PDFPage, rect: CGRect)?
+    @Published var showLinkSheet = false
+    @Published var showFindRedact = false
+    @Published var signaturePadInitials = false
+    /// Annotation copied with ⌘C, pasted with ⌘V.
+    var annotationClipboard: PDFAnnotation?
     @Published private(set) var lastMarkupTool: Tool = .highlight
     @Published private(set) var lastShape: Tool = .rectangle
+    @Published private(set) var lastPen: Tool = .pen
+    @Published private(set) var lastFillAndSign: Tool = .signature
     @Published var selected: SelectedAnnotation? { didSet { overlayTick += 1 } }
     @Published var textSelectionActive = false
     /// Bumped whenever on-screen geometry changes so overlays re-measure.
@@ -212,6 +298,8 @@ final class EditorController: ObservableObject {
     @Published var searchText = ""
     @Published private(set) var searchResults: [PDFSelection] = []
     @Published var searchIndex = 0
+    @Published var searchMatchCase = false { didSet { if !searchResults.isEmpty { search() } } }
+    @Published var searchWholeWords = false { didSet { if !searchResults.isEmpty { search() } } }
     @Published var showSignaturePad = false
     @Published var showProperties = false
     @Published var showPasswordSheet = false
@@ -404,19 +492,31 @@ final class EditorController: ObservableObject {
 
     private func toolChanged() {
         if tool != .crop { cropDraft = nil }
-        if tool != .select, tool != .crop { lastMarkupTool = tool }
-        if tool.shape != nil { lastShape = tool }
-        if tool != .select, tool != .crop, mode != .markup { mode = .markup }
+        pdfView?.cancelPointTool()
+        if !tool.isUtility { lastMarkupTool = tool }
+        if tool.isShapeTool { lastShape = tool }
+        if Tool.pens.contains(tool) { lastPen = tool }
+        if Tool.fillAndSign.contains(tool) { lastFillAndSign = tool }
+        if !tool.isUtility, mode != .markup { mode = .markup }
         if tool != .select { select(nil) }
         if let type = tool.markupType, let selection = pdfView?.currentSelection, !(selection.string ?? "").isEmpty {
             applyMarkup(type, to: selection)
         }
-        if tool == .signature, SignatureStore.load() == nil { showSignaturePad = true }
+        if tool == .signature, signatureLibrary.filter({ !$0.isInitials }).isEmpty {
+            signaturePadInitials = false
+            showSignaturePad = true
+        }
         if let view = pdfView { view.window?.invalidateCursorRects(for: view) }
     }
 
     func style(for tool: Tool) -> ToolStyle {
         styles[tool] ?? ToolStyle(color: Palette.swatches[0], width: 2)
+    }
+
+    /// Colour for a new annotation made with `tool`, including its opacity.
+    func strokeColor(for tool: Tool) -> NSColor {
+        let style = style(for: tool)
+        return style.color.withAlphaComponent(style.opacity)
     }
 
     /// The colour shown in the palette: the selected annotation's, else the active tool's.
@@ -432,50 +532,111 @@ final class EditorController: ObservableObject {
         return style(for: tool).width
     }
 
-    var widthApplies: Bool {
-        if let selected { return ["FreeText", "Ink", "Square", "Circle", "Line"].contains(selected.annotation.type ?? "") }
-        return tool.usesWidth
+    var activeOpacity: CGFloat {
+        if let selected {
+            let a = selected.annotation
+            return a.type == "FreeText" ? (a.fontColor?.alphaComponent ?? 1) : a.type == "Highlight" ? 1 : a.color.alphaComponent
+        }
+        return style(for: tool).opacity
     }
 
-    var widthIsFontSize: Bool { selected?.annotation.type == "FreeText" || (selected == nil && tool == .text) }
+    var activeFill: NSColor? {
+        if let selected { return selected.annotation.interiorColor }
+        return style(for: tool).fill
+    }
+
+    var activeDash: Annotations.LineStyle {
+        if let selected { return Annotations.lineStyle(of: selected.annotation) }
+        return style(for: tool).dash
+    }
+
+    private var selectedType: String { selected?.annotation.type ?? "" }
+    var widthApplies: Bool { selected.map { _ in ["FreeText", "Ink", "Square", "Circle", "Line"].contains(selectedType) } ?? tool.usesWidth }
+    var widthIsFontSize: Bool { selected.map { _ in selectedType == "FreeText" } ?? [.text, .date].contains(tool) }
+    var fillApplies: Bool { selected.map { _ in ["Square", "Circle"].contains(selectedType) } ?? tool.usesFill }
+    var dashApplies: Bool { selected.map { _ in ["Ink", "Square", "Circle", "Line"].contains(selectedType) } ?? tool.usesDash }
+    var opacityApplies: Bool {
+        if let selected { return !["Highlight", "Underline", "StrikeOut", "Text"].contains(selectedType) && !Annotations.isRedaction(selected.annotation) }
+        return tool.isStyled && tool.markupType == nil && tool != .note
+    }
 
     func setColor(_ color: NSColor) {
         let color = Palette.srgb(color)
         if let selected {
-            recolor(selected.annotation, on: selected.page, to: color)
+            let opacity = activeOpacity
+            restyle(selected, name: "Change Color") { Annotations.setColor(color.withAlphaComponent(selected.annotation.type == "Highlight" ? 1 : opacity), of: $0) }
         }
         if tool.isStyled { styles[tool, default: style(for: tool)].color = color }
         if selected == nil, tool == .select { styles[.highlight]?.color = color }
     }
 
     func setWidth(_ width: CGFloat) {
-        if let selected { restyleWidth(selected.annotation, on: selected.page, to: width) }
+        if let selected {
+            restyle(selected, name: "Change Width") { a in
+                if a.type == "FreeText" {
+                    a.font = NSFont.systemFont(ofSize: width)
+                    self.refit(a)
+                } else {
+                    let style = Annotations.lineStyle(of: a)
+                    let border = PDFBorder()
+                    border.lineWidth = width
+                    a.border = border
+                    Annotations.setLineStyle(style, of: a)
+                }
+            }
+        }
         if tool.usesWidth { styles[tool, default: style(for: tool)].width = width }
     }
 
-    private func recolor(_ annotation: PDFAnnotation, on page: PDFPage, to color: NSColor) {
-        let previous = Annotations.color(of: annotation)
-        Annotations.setColor(color, of: annotation)
-        registerUndo("Change Color") { $0.recolor(annotation, on: page, to: previous) }
-        changed([page])
+    func setOpacity(_ opacity: CGFloat) {
+        if let selected {
+            restyle(selected, name: "Change Opacity") { a in
+                if a.type == "FreeText" { a.fontColor = a.fontColor?.withAlphaComponent(opacity) }
+                else { a.color = a.color.withAlphaComponent(opacity) }
+                if let fill = a.interiorColor { a.interiorColor = fill.withAlphaComponent(opacity) }
+            }
+        }
+        if tool.isStyled { styles[tool, default: style(for: tool)].opacity = opacity }
+    }
+
+    func setFill(_ fill: NSColor?) {
+        let fill = fill.map(Palette.srgb)
+        if let selected { restyle(selected, name: "Change Fill") { Annotations.setFill(fill?.withAlphaComponent(self.activeOpacity), of: $0) } }
+        if tool.usesFill { styles[tool, default: style(for: tool)].fill = fill }
+    }
+
+    func setDash(_ dash: Annotations.LineStyle) {
+        if let selected { restyle(selected, name: "Change Line Style") { Annotations.setLineStyle(dash, of: $0) } }
+        if tool.usesDash { styles[tool, default: style(for: tool)].dash = dash }
+    }
+
+    /// Everything the style controls can change, captured for undo.
+    private struct StyleSnapshot {
+        let color: NSColor, fontColor: NSColor?, font: NSFont?, interior: NSColor?, border: PDFBorder?, bounds: CGRect
+        init(_ a: PDFAnnotation) {
+            color = a.color; fontColor = a.fontColor; font = a.font; interior = a.interiorColor; bounds = a.bounds
+            border = a.border?.copy() as? PDFBorder
+        }
+        func apply(to a: PDFAnnotation) {
+            a.color = color; a.fontColor = fontColor; a.font = font; a.interiorColor = interior; a.border = border; a.bounds = bounds
+        }
+    }
+
+    private func restyle(_ target: SelectedAnnotation, name: String, _ change: (PDFAnnotation) -> Void) {
+        let before = StyleSnapshot(target.annotation)
+        change(target.annotation)
+        let after = StyleSnapshot(target.annotation)
+        registerStyleUndo(target, name: name, undo: before, redo: after)
+        changed([target.page])
         objectWillChange.send()
     }
 
-    private func restyleWidth(_ annotation: PDFAnnotation, on page: PDFPage, to width: CGFloat) {
-        let previous: CGFloat
-        if annotation.type == "FreeText" {
-            previous = annotation.font?.pointSize ?? 14
-            annotation.font = NSFont.systemFont(ofSize: width)
-            refit(annotation)
-        } else {
-            previous = annotation.border?.lineWidth ?? 1
-            let border = PDFBorder()
-            border.lineWidth = width
-            annotation.border = border
+    private func registerStyleUndo(_ target: SelectedAnnotation, name: String, undo: StyleSnapshot, redo: StyleSnapshot) {
+        registerUndo(name) { editor in
+            undo.apply(to: target.annotation)
+            editor.registerStyleUndo(target, name: name, undo: redo, redo: undo)
+            editor.changed([target.page])
         }
-        registerUndo("Change Width") { $0.restyleWidth(annotation, on: page, to: previous) }
-        changed([page])
-        objectWillChange.send()
     }
 
     // MARK: Annotation editing
@@ -514,7 +675,15 @@ final class EditorController: ObservableObject {
         showToast("Copied")
     }
 
+    /// Name stamped on new annotations, shown in other PDF apps as the author.
+    static var authorName: String {
+        let saved = UserDefaults.standard.string(forKey: "authorName") ?? ""
+        return saved.isEmpty ? NSFullUserName() : saved
+    }
+
     func add(_ annotation: PDFAnnotation, to page: PDFPage) {
+        if annotation.userName == nil || annotation.userName?.isEmpty == true { annotation.userName = Self.authorName }
+        if annotation.modificationDate == nil { annotation.modificationDate = Date() }
         page.addAnnotation(annotation)
         registerUndo("Add \(Annotations.displayName(annotation))") { $0.remove(annotation, from: page) }
         changed([page])
@@ -588,13 +757,172 @@ final class EditorController: ObservableObject {
         select(SelectedAnnotation(annotation: a, page: page))
     }
 
+    var activeSignature: SavedSignature? {
+        signatureLibrary.first { $0.id == activeSignatureID } ?? signatureLibrary.first { !$0.isInitials }
+    }
+
+    func addSignature(_ signature: SavedSignature) {
+        signatureLibrary.append(signature)
+        SignatureLibrary.save(signatureLibrary)
+        activeSignatureID = signature.id
+    }
+
+    func deleteSignature(_ signature: SavedSignature) {
+        signatureLibrary.removeAll { $0.id == signature.id }
+        SignatureLibrary.save(signatureLibrary)
+        if activeSignatureID == signature.id { activeSignatureID = nil }
+    }
+
     func placeSignature(at point: CGPoint, on page: PDFPage) {
-        guard let signature = SignatureStore.load() else { showSignaturePad = true; return }
-        if let a = signature.annotation(center: point, width: 160, color: Palette.swatches[0]) {
+        guard let signature = activeSignature else { showSignaturePad = true; return }
+        let width: CGFloat = signature.isInitials ? 70 : 170
+        if let a = signature.annotation(center: point, width: width, color: Palette.swatches[0]) {
             add(a, to: page)
             tool = .select
             select(SelectedAnnotation(annotation: a, page: page))
         }
+    }
+
+    /// Checkmark, cross and date: small text placed with one click.
+    func placeMark(_ tool: Tool, at point: CGPoint, on page: PDFPage) {
+        let style = style(for: tool)
+        let text: String
+        switch tool {
+        case .checkmark: text = "✓"
+        case .cross: text = "✗"
+        default: text = Date().formatted(date: .numeric, time: .omitted)
+        }
+        let a = Annotations.freeText(text, at: .zero, color: strokeColor(for: tool), fontSize: style.width)
+        a.bounds.origin = CGPoint(x: point.x - a.bounds.width / 2, y: point.y - a.bounds.height / 2)
+        add(a, to: page)
+        select(SelectedAnnotation(annotation: a, page: page))
+    }
+
+    func placeStamp(at point: CGPoint, on page: PDFPage) {
+        let a: PDFAnnotation
+        let subtitle = "\(Self.authorName) · \(Date().formatted(date: .abbreviated, time: .shortened))"
+        switch stampChoice {
+        case let .preset(preset): a = TextStampAnnotation.make(title: preset.title, subtitle: subtitle, tint: preset.color, at: point)
+        case let .custom(text): a = TextStampAnnotation.make(title: text.uppercased(), subtitle: subtitle, tint: Palette.swatches[7], at: point)
+        case let .image(image):
+            let width = min(180, image.size.width), height = width * image.size.height / max(image.size.width, 1)
+            a = ImageAnnotation(image: image, bounds: CGRect(x: point.x - width / 2, y: point.y - height / 2, width: width, height: height))
+        }
+        add(a, to: page)
+        select(SelectedAnnotation(annotation: a, page: page))
+    }
+
+    func chooseImageStamp() {
+        guard let url = Prompt.open([.image], multiple: false, title: "Choose an Image Stamp").first, let image = NSImage(contentsOf: url) else { return }
+        stampChoice = .image(image)
+        tool = .stamp
+    }
+
+    func chooseCustomStamp() {
+        guard let text = Prompt.text("Custom Stamp", message: "Text for the stamp:"), !text.isEmpty else { return }
+        stampChoice = .custom(text)
+        tool = .stamp
+    }
+
+    /// Inserts an image fitted into `rect`, or a default size at `rect.origin` for a click.
+    func placeImage(in rect: CGRect, on page: PDFPage) {
+        guard let url = Prompt.open([.image], multiple: false, title: "Choose an Image").first, let image = NSImage(contentsOf: url) else { return }
+        insertImage(image, in: rect, on: page)
+    }
+
+    func insertImage(_ image: NSImage, in rect: CGRect, on page: PDFPage) {
+        let aspect = image.size.width / max(image.size.height, 1)
+        var frame = rect
+        if rect.width < 10 || rect.height < 10 {
+            let width = min(240, image.size.width)
+            frame = CGRect(x: rect.midX - width / 2, y: rect.midY - width / aspect / 2, width: width, height: width / aspect)
+        } else if rect.width / rect.height > aspect {
+            let width = rect.height * aspect
+            frame = CGRect(x: rect.midX - width / 2, y: rect.minY, width: width, height: rect.height)
+        } else {
+            let height = rect.width / aspect
+            frame = CGRect(x: rect.minX, y: rect.midY - height / 2, width: rect.width, height: height)
+        }
+        let a = ImageAnnotation(image: image, bounds: frame)
+        add(a, to: page)
+        tool = .select
+        select(SelectedAnnotation(annotation: a, page: page))
+    }
+
+    func commitPolyline(_ points: [CGPoint], closed: Bool, on page: PDFPage) {
+        let style = style(for: closed ? .polygon : .polyline)
+        guard let a = Annotations.polyline(points, closed: closed, color: strokeColor(for: closed ? .polygon : .polyline), lineWidth: style.width) else { return }
+        Annotations.setLineStyle(style.dash, of: a)
+        add(a, to: page)
+    }
+
+    func requestLink(in rect: CGRect, on page: PDFPage) {
+        pendingLink = (page, rect)
+        showLinkSheet = true
+    }
+
+    func commitLink(url: URL?, pageNumber: Int?) {
+        guard let (page, rect) = pendingLink else { return }
+        pendingLink = nil
+        let a: PDFAnnotation
+        if let url { a = Annotations.link(bounds: rect, url: url) }
+        else if let pageNumber, let target = document.page(at: pageNumber - 1) { a = Annotations.link(bounds: rect, to: target) }
+        else { return }
+        add(a, to: page)
+        showToast("Link added")
+    }
+
+    func snapshot(_ rect: CGRect, on page: PDFPage) {
+        guard let cg = PDFOps.renderImage(page, scale: 3) else { return }
+        let box = page.bounds(for: .mediaBox)
+        let crop = CGRect(x: (rect.minX - box.minX) * 3, y: (box.maxY - rect.maxY) * 3, width: rect.width * 3, height: rect.height * 3)
+        guard page.rotation == 0, let piece = cg.cropping(to: crop) else { showToast("Snapshots of rotated pages are not supported"); return }
+        let image = NSImage(cgImage: piece, size: rect.size)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.writeObjects([image])
+        showToast("Area copied as an image")
+    }
+
+    // MARK: Clipboard and stacking
+
+    func copySelectedAnnotation(cut: Bool = false) {
+        guard let selected, let copy = selected.annotation.copy() as? PDFAnnotation else { return }
+        if let paths = selected.annotation.paths, copy.paths?.isEmpty ?? true { paths.forEach { copy.add($0.copy() as! NSBezierPath) } }
+        annotationClipboard = copy
+        if cut { remove(selected.annotation, from: selected.page) }
+    }
+
+    /// Pastes the copied annotation, or an image from the system clipboard, onto the current page.
+    func paste() -> Bool {
+        guard let page = pdfView?.currentPage else { return false }
+        if let source = annotationClipboard, let copy = Annotations.duplicate(source) {
+            if !page.bounds(for: .cropBox).intersects(copy.bounds) {
+                let box = page.bounds(for: .cropBox)
+                copy.bounds.origin = CGPoint(x: box.midX - copy.bounds.width / 2, y: box.midY - copy.bounds.height / 2)
+            }
+            annotationClipboard = copy
+            add(copy, to: page)
+            select(SelectedAnnotation(annotation: copy, page: page))
+            return true
+        }
+        if let image = NSImage(pasteboard: .general), NSPasteboard.general.data(forType: .string) == nil {
+            let box = page.bounds(for: .cropBox)
+            insertImage(image, in: CGRect(x: box.midX, y: box.midY, width: 0, height: 0), on: page)
+            return true
+        }
+        return false
+    }
+
+    func reorderSelected(toFront: Bool) {
+        guard let selected else { return }
+        let before = selected.page.annotations
+        Annotations.reorder(selected.annotation, on: selected.page, toFront: toFront)
+        registerUndo(toFront ? "Bring to Front" : "Send to Back") { editor in
+            before.forEach(selected.page.removeAnnotation)
+            before.forEach(selected.page.addAnnotation)
+            editor.changed([selected.page])
+        }
+        changed([selected.page])
     }
 
     func beginEditingSelected() {
@@ -607,6 +935,41 @@ final class EditorController: ObservableObject {
             for a in page.annotations where Annotations.isUserEditable(a) { remove(a, from: page) }
         }
         undoManager?.setActionName("Remove All Annotations")
+    }
+
+    @Published var redactionStyle: Annotations.RedactionStyle = .blackout
+
+    func markForRedaction(_ queries: [String], matchCase: Bool, wholeWords: Bool, style: Annotations.RedactionStyle) {
+        let results = queries.flatMap { Search.find($0, in: document, matchCase: matchCase, wholeWords: wholeWords) }
+        let marks = Search.redactionMarks(for: results, style: style)
+        for (page, annotation) in marks { add(annotation, to: page) }
+        undoManager?.setActionName("Mark for Redaction")
+        if mode != .markup { mode = .markup }
+        if let first = results.first { go(to: first) }
+        showToast("Marked \(results.count) \(results.count == 1 ? "match" : "matches") — review, then Apply Redactions")
+    }
+
+    // MARK: Forms
+
+    func addFormField(_ kind: Forms.FieldKind, in rect: CGRect, on page: PDFPage) {
+        let defaultSize: CGSize = kind == .text ? CGSize(width: 180, height: 22) : kind == .choice ? CGSize(width: 140, height: 22) : CGSize(width: 16, height: 16)
+        let frame = rect.width < 6 || rect.height < 6 ? CGRect(origin: CGPoint(x: rect.minX, y: rect.minY - defaultSize.height / 2), size: defaultSize) : rect
+        let field = Forms.field(kind, in: frame, document: document)
+        add(field, to: page)
+        select(SelectedAnnotation(annotation: field, page: page))
+        showToast("\(kind.rawValue) “\(field.fieldName ?? "")” added — switch to Read to fill it in")
+    }
+
+    func resetForm() {
+        let previous = Forms.reset(document)
+        guard !previous.isEmpty else { showToast("This document has no form fields"); return }
+        registerUndo("Clear Form") { editor in
+            previous.forEach { $0.restore() }
+            editor.changed()
+        }
+        changed()
+        PDFOps.pages(of: document).forEach { pdfView?.annotationsChanged(on: $0) }
+        showToast("Form cleared")
     }
 
     func applyRedactions() {
@@ -924,7 +1287,7 @@ final class EditorController: ObservableObject {
         let query = searchText.trimmingCharacters(in: .whitespaces)
         guard !query.isEmpty else { clearSearch(); return }
         if mode == .pages { mode = .read }
-        searchResults = document.findString(query, withOptions: [.caseInsensitive, .diacriticInsensitive])
+        searchResults = Search.find(query, in: document, matchCase: searchMatchCase, wholeWords: searchWholeWords)
         for result in searchResults { result.color = NSColor.systemYellow.withAlphaComponent(0.55) }
         pdfView?.highlightedSelections = searchResults
         searchIndex = 0

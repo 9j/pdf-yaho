@@ -236,12 +236,27 @@ struct SearchResultList: View {
             ContentUnavailableView.search(text: editor.searchText)
         } else {
             VStack(spacing: 0) {
-                Text("\(editor.searchResults.count) results")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 6)
+                HStack {
+                    Text("\(editor.searchResults.count) results").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Menu {
+                        Toggle("Match Case", isOn: $editor.searchMatchCase)
+                        Toggle("Whole Words", isOn: $editor.searchWholeWords)
+                        Divider()
+                        Button("Redact All Matches…") {
+                            editor.markForRedaction([editor.searchText], matchCase: editor.searchMatchCase,
+                                                    wholeWords: editor.searchWholeWords, style: editor.redactionStyle)
+                        }
+                    } label: {
+                        Image(systemName: "line.3.horizontal.decrease.circle")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("Search options")
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
                 List(Array(editor.searchResults.enumerated()), id: \.offset) { index, result in
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Page \((result.pages.first.map { editor.document.index(for: $0) } ?? 0) + 1)")

@@ -152,3 +152,56 @@ struct OptionRow: View {
         .buttonStyle(.plain)
     }
 }
+
+struct FindRedactSheet: View {
+    @ObservedObject var editor: EditorController
+    @Environment(\.dismiss) private var dismiss
+    @State private var terms = ""
+    @State private var matchCase = false
+    @State private var wholeWords = true
+    @State private var style: Annotations.RedactionStyle = .blackout
+
+    private var queries: [String] {
+        terms.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    }
+
+    private var matchCount: Int {
+        queries.reduce(0) { $0 + Search.find($1, in: editor.document, matchCase: matchCase, wholeWords: wholeWords).count }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            SheetHeader(symbol: "eye.slash", title: "Find and Redact",
+                        subtitle: "Marks every match for redaction. Review the marks, then choose Apply Redactions to remove the text for good.")
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Words or phrases, one per line").font(.callout).foregroundStyle(.secondary)
+                TextEditor(text: $terms)
+                    .font(.body)
+                    .frame(height: 80)
+                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
+            }
+            HStack(spacing: 18) {
+                Toggle("Match case", isOn: $matchCase)
+                Toggle("Whole words", isOn: $wholeWords)
+            }
+            Picker("Mark style", selection: $style) {
+                ForEach(Annotations.RedactionStyle.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            Text(queries.isEmpty ? " " : "\(matchCount) \(matchCount == 1 ? "match" : "matches") found")
+                .font(.callout).foregroundStyle(.secondary).monospacedDigit()
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Mark \(matchCount) for Redaction") {
+                    editor.markForRedaction(queries, matchCase: matchCase, wholeWords: wholeWords, style: style)
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(matchCount == 0)
+            }
+        }
+        .padding(22)
+        .frame(width: 460)
+    }
+}
