@@ -71,7 +71,7 @@ private struct HomePageView: View {
             }
 
             VStack(alignment: .leading, spacing: 12) {
-                SectionHeader(title: "Tools for You") { page = .tools }
+                SectionHeader(title: "Quick Tools") { page = .tools }
                 ArrowScrollRow(count: HomeTools.featured.count) {
                     HStack(spacing: 12) {
                         ForEach(Array(HomeTools.featured.enumerated()), id: \.offset) { index, tool in
@@ -82,13 +82,17 @@ private struct HomePageView: View {
                 }
             }
 
-            documentRow(title: "Recent", urls: Array(store.recents.prefix(12)), target: .recents,
-                        empty: EmptyState(symbol: "clock", title: "No recent documents",
-                                          message: "Documents you open will show up here. Drop a PDF anywhere in this window to get started."))
-
-            documentRow(title: "Favorites", urls: Array(store.favorites.prefix(12)), target: .favorites,
-                        empty: EmptyState(symbol: "star", title: "No favorites yet",
-                                          message: "Hover over a document and click its star to keep it close."))
+            if store.recents.isEmpty && store.favorites.isEmpty {
+                FirstRunDropArea()
+            } else {
+                documentRow(title: "Recent", urls: Array(store.recents.prefix(12)), target: .recents,
+                            empty: EmptyState(symbol: "clock", title: "No recent documents",
+                                              message: "Documents you open will show up here."))
+                if !store.favorites.isEmpty {
+                    documentRow(title: "Favorites", urls: Array(store.favorites.prefix(12)), target: .favorites,
+                                empty: EmptyState(symbol: "star", title: "No favorites yet", message: ""))
+                }
+            }
         }
     }
 
@@ -251,5 +255,24 @@ struct ArrowScrollRow<Content: View>: View {
         .opacity(visible ? 1 : 0)
         .animation(.easeInOut(duration: 0.15), value: visible)
         .allowsHitTesting(visible)
+    }
+}
+
+
+/// One large invitation to open a document, shown until there are recent or favorite files.
+private struct FirstRunDropArea: View {
+    var body: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "arrow.down.doc").font(.system(size: 40, weight: .light)).foregroundStyle(Color.accentColor)
+            Text("Drop a PDF here to open it").font(.title2.weight(.semibold))
+            Text("Or open one from your Mac. Documents you open will appear here, and you can star favorites.")
+                .foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 380)
+            Button { NSDocumentController.shared.openDocument(nil) } label: { Label("Open…", systemImage: "folder") }
+                .buttonStyle(.borderedProminent).controlSize(.large)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 48)
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .strokeBorder(Color.secondary.opacity(0.35), style: StrokeStyle(lineWidth: 1.5, dash: [8, 6])))
     }
 }

@@ -43,7 +43,10 @@ struct PagecraftApp: App {
             DocumentView(file: configuration.document)
         }
         .defaultSize(width: 1280, height: 920)
-        .commands { PagecraftCommands() }
+        .commands {
+            SidebarCommands()
+            PagecraftCommands()
+        }
         Settings { SettingsView() }
     }
 }
@@ -121,6 +124,13 @@ struct PagecraftCommands: Commands {
             Button("Find Previous") { editor?.findNext(-1) }.keyboardShortcut("g", modifiers: [.command, .shift])
         }
         CommandGroup(before: .toolbar) {
+            Menu("Sidebar") {
+                ForEach(Array(SidebarTab.allCases.enumerated()), id: \.element) { index, tab in
+                    Button(tab.rawValue) { editor?.sidebarTab = tab; editor?.revealSidebar = true }
+                        .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: [.command, .option])
+                }
+            }
+            .disabled(editor == nil)
             Menu("Toolset") {
                 ForEach(Array(EditorMode.allCases.enumerated()), id: \.element) { index, mode in
                     Button(mode.title) { editor?.mode = mode }
@@ -143,6 +153,7 @@ struct PagecraftCommands: Commands {
             Menu("Split View") {
                 Button("Side by Side") { if editor?.split == nil { editor?.openSplit(vertical: false) } else { editor?.split?.vertical = false } }
                 Button("Stacked") { if editor?.split == nil { editor?.openSplit(vertical: true) } else { editor?.split?.vertical = true } }
+                Button("This Document in Split View") { editor?.openSplitSameDocument() }
                 Button("Open Document in Split View…") { editor?.chooseSplitDocument() }
                 Divider()
                 Button("Swap Sides") { editor?.split?.swapped.toggle() }.disabled(editor?.split == nil)
@@ -150,79 +161,93 @@ struct PagecraftCommands: Commands {
             }
             .disabled(editor == nil)
             Button("Compare in New Window…") { editor.map(CompareWindow.compare) }
-                .keyboardShortcut("c", modifiers: [.command, .option])
                 .disabled(editor == nil)
             Divider()
         }
         CommandMenu("Go") {
-            Button("Previous Page") { editor.map { $0.goToPage($0.currentPageIndex - 1) } }
-                .keyboardShortcut(.upArrow, modifiers: [.command, .option])
-            Button("Next Page") { editor.map { $0.goToPage($0.currentPageIndex + 1) } }
-                .keyboardShortcut(.downArrow, modifiers: [.command, .option])
-            Button("Back") { editor?.pdfView?.goBack(nil) }.keyboardShortcut("[")
-            Button("Forward") { editor?.pdfView?.goForward(nil) }.keyboardShortcut("]")
-            Divider()
-            Button("First Page") { editor?.goToPage(0) }.keyboardShortcut(.upArrow)
-            Button("Last Page") { editor.map { $0.goToPage($0.pageCount - 1) } }.keyboardShortcut(.downArrow)
-            Divider()
-            Button("Go to Page…") { editor?.focusPageField = true }
-                .keyboardShortcut("g", modifiers: [.command, .option])
+            Group {
+                Button("Previous Page") { editor.map { $0.goToPage($0.currentPageIndex - 1) } }
+                    .keyboardShortcut(.upArrow, modifiers: [.command, .option])
+                Button("Next Page") { editor.map { $0.goToPage($0.currentPageIndex + 1) } }
+                    .keyboardShortcut(.downArrow, modifiers: [.command, .option])
+                Button("Back") { editor?.pdfView?.goBack(nil) }.keyboardShortcut("[")
+                Button("Forward") { editor?.pdfView?.goForward(nil) }.keyboardShortcut("]")
+                Divider()
+                Button("First Page") { editor?.goToPage(0) }.keyboardShortcut(.upArrow)
+                Button("Last Page") { editor.map { $0.goToPage($0.pageCount - 1) } }.keyboardShortcut(.downArrow)
+                Divider()
+                Button("Go to Page…") { editor?.focusPageField = true }
+                    .keyboardShortcut("g", modifiers: [.command, .option])
+            }
+            .disabled(editor == nil)
         }
         CommandMenu("Markup") {
-            ForEach(Tool.allCases) { tool in
-                Button(tool.label) { editor?.tool = tool }
+            Group {
+                ForEach(EditorMode.allCases.filter(\.isMarkup)) { mode in
+                    Menu(mode.title) {
+                        ForEach(mode.tools.filter { $0 != .select && $0 != .eraser }) { tool in
+                            Button(tool.label) { editor?.mode = mode; editor?.tool = tool }
+                        }
+                    }
+                }
+                Button("Select") { editor?.tool = .select }
+                Button("Eraser") { editor?.tool = .eraser }
+                Divider()
+                Button("New Signature…") { editor?.signaturePadInitials = false; editor?.showSignaturePad = true }
+                Button("New Initials…") { editor?.signaturePadInitials = true; editor?.showSignaturePad = true }
+                Divider()
+                Button("Find and Redact…") { editor?.showFindRedact = true }.keyboardShortcut("f", modifiers: [.command, .shift])
+                Button("Apply Redactions…") { editor?.applyRedactions() }
+                Divider()
+                Button("Clear Form") { editor?.resetForm() }
+                Divider()
+                Button("Measurement Scale…") { editor?.showMeasureScale = true }
+                Button("Snapshot Area") { editor?.tool = .snapshot }
+                Divider()
+                Button("Remove All Annotations") { editor?.removeAllAnnotations() }
             }
-            Divider()
-            Button("New Signature…") { editor?.signaturePadInitials = false; editor?.showSignaturePad = true }
-            Button("New Initials…") { editor?.signaturePadInitials = true; editor?.showSignaturePad = true }
-            Divider()
-            Button("Find and Redact…") { editor?.showFindRedact = true }.keyboardShortcut("f", modifiers: [.command, .shift])
-            Button("Apply Redactions…") { editor?.applyRedactions() }
-            Divider()
-            Button("Clear Form") { editor?.resetForm() }
-            Divider()
-            Button("Measurement Scale…") { editor?.showMeasureScale = true }
-            Button("Snapshot Area") { editor?.tool = .snapshot }
-            Divider()
-            Button("Remove All Annotations") { editor?.removeAllAnnotations() }
+            .disabled(editor == nil)
         }
         CommandMenu("Page") {
-            Menu("Insert") {
-                Button("Blank Page") { editor?.insertBlankPage() }.keyboardShortcut("n", modifiers: [.command, .option])
-                Button("From File…") { run(Exporter.insertFromFile) }
-                Button("From Images…") { editor?.insertImages() }
-                Button("From Clipboard") { editor?.insertFromClipboard() }
+            Group {
+                Menu("Insert") {
+                    Button("Blank Page") { editor?.insertBlankPage() }.keyboardShortcut("n", modifiers: [.command, .option])
+                    Button("From File…") { run(Exporter.insertFromFile) }
+                    Button("From Images…") { editor?.insertImages() }
+                    Button("From Clipboard") { editor?.insertFromClipboard() }
+                }
+                Button("Duplicate") { editor?.duplicatePages() }
+                Button("Copy Pages") { editor?.copyPages() }
+                Button("Paste Pages") { editor?.insertFromClipboard() }
+                Button("Delete") { editor?.deletePages() }.keyboardShortcut(.delete, modifiers: [.command])
+                Divider()
+                Button("Rotate Left") { editor?.rotate(-90) }.keyboardShortcut("l")
+                Button("Rotate Right") { editor?.rotate(90) }.keyboardShortcut("r")
+                Button("Reverse Order") { editor?.reversePages() }
+                Divider()
+                Button("Crop…") { editor?.beginCrop() }.keyboardShortcut("k", modifiers: [.command, .shift])
+                Button("Clear Margins") { editor?.autoCrop() }
+                Menu("Enhance Scan") {
+                    ForEach(EnhanceMode.allCases) { mode in Button(mode.rawValue) { editor?.enhancePages(mode) } }
+                }
+                Button("Split Book Spreads") { editor?.splitSpreads() }
+                Button("Reset Crop") { editor?.resetCrop() }
+                Button("Page Size…") { editor?.showPageSize = true }
+                Divider()
+                Button("Extract…") { editor.map { Exporter.extract($0, indices: $0.targetPageIndices) } }
+                Button("Split…") { editor?.showSplit = true }
+                Divider()
+                Button("Page Numbers…") { editor?.headerFooterPreset = .pageNumbers }
+                Button("Header & Footer…") { editor?.headerFooterPreset = .custom }
+                Button("Bates Numbering…") { editor?.headerFooterPreset = .bates }
+                Button("Remove Header, Footer & Numbers") { editor?.removeStamps() }
+                Divider()
+                Button(editor.map { $0.isBookmarked($0.currentPageIndex) } == true ? "Remove Bookmark" : "Bookmark This Page") { editor?.toggleBookmark() }
+                    .keyboardShortcut("d")
+                Button("Add Outline Item") { editor?.addOutlineItem() }
+                    .keyboardShortcut("d", modifiers: [.command, .option])
             }
-            Button("Duplicate") { editor?.duplicatePages() }
-            Button("Copy Pages") { editor?.copyPages() }
-            Button("Paste Pages") { editor?.insertFromClipboard() }
-            Button("Delete") { editor?.deletePages() }.keyboardShortcut(.delete, modifiers: [.command])
-            Divider()
-            Button("Rotate Left") { editor?.rotate(-90) }.keyboardShortcut("l")
-            Button("Rotate Right") { editor?.rotate(90) }.keyboardShortcut("r")
-            Button("Reverse Order") { editor?.reversePages() }
-            Divider()
-            Button("Crop…") { editor?.beginCrop() }.keyboardShortcut("k", modifiers: [.command, .shift])
-            Button("Clear Margins") { editor?.autoCrop() }
-            Menu("Enhance Scan") {
-                ForEach(EnhanceMode.allCases) { mode in Button(mode.rawValue) { editor?.enhancePages(mode) } }
-            }
-            Button("Split Book Spreads") { editor?.splitSpreads() }
-            Button("Reset Crop") { editor?.resetCrop() }
-            Button("Page Size…") { editor?.showPageSize = true }
-            Divider()
-            Button("Extract…") { editor.map { Exporter.extract($0, indices: $0.targetPageIndices) } }
-            Button("Split…") { editor?.showSplit = true }
-            Divider()
-            Button("Page Numbers…") { editor?.headerFooterPreset = .pageNumbers }
-            Button("Header & Footer…") { editor?.headerFooterPreset = .custom }
-            Button("Bates Numbering…") { editor?.headerFooterPreset = .bates }
-            Button("Remove Header, Footer & Numbers") { editor?.removeStamps() }
-            Divider()
-            Button(editor.map { $0.isBookmarked($0.currentPageIndex) } == true ? "Remove Bookmark" : "Bookmark This Page") { editor?.toggleBookmark() }
-                .keyboardShortcut("d")
-            Button("Add Outline Item") { editor?.addBookmark() }
-                .keyboardShortcut("d", modifiers: [.command, .option])
+            .disabled(editor == nil)
         }
     }
 

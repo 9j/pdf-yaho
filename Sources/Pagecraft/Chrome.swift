@@ -76,6 +76,8 @@ struct ToolsetSwitcher: View {
                 }
                 .buttonStyle(.plain)
                 .help(shortcutHelp(mode))
+                .accessibilityLabel(mode.title)
+                .accessibilityAddTraits(selected ? .isSelected : [])
             }
             Button { customizing.toggle() } label: {
                 Image(systemName: "ellipsis").font(.system(size: 12, weight: .medium)).frame(width: 24, height: 26).contentShape(Rectangle())
@@ -125,7 +127,7 @@ struct DisplaySettingsButton: View {
 
     var body: some View {
         Button { open.toggle() } label: {
-            Label("Display", systemImage: "rectangle.split.2x1")
+            Label("View", systemImage: "eyeglasses")
         }
         .help("Page layout, theme, zoom and split view")
         .popover(isPresented: $open, arrowEdge: .bottom) {
@@ -136,7 +138,6 @@ struct DisplaySettingsButton: View {
 
 struct DisplaySettingsPopover: View {
     @ObservedObject var editor: EditorController
-    @AppStorage("pageIndicator") private var pageIndicator = Preferences.PageIndicator.automatic.rawValue
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -178,14 +179,6 @@ struct DisplaySettingsPopover: View {
                             .controlSize(.small)
                     }
                 }
-            }
-            section("Page Number Indicator") {
-                Picker("Indicator", selection: $pageIndicator) {
-                    ForEach(Preferences.PageIndicator.allCases) { Text($0.rawValue).tag($0.rawValue) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .onChange(of: pageIndicator) { _, _ in editor.pokeHUD() }
             }
         }
         .padding(18)
@@ -243,6 +236,35 @@ struct TileButton: View {
 }
 
 /// Shown after jumping through a link or the outline, to return to where you were.
+/// Shared look for floating capsules and bars: Liquid Glass on macOS 26, material before.
+extension View {
+    @ViewBuilder
+    func floatingChrome<S: InsettableShape>(_ shape: S) -> some View {
+        if #available(macOS 26, *) {
+            self.glassEffect(.regular, in: shape)
+        } else {
+            self.background(.regularMaterial, in: shape)
+                .overlay(shape.strokeBorder(.separator.opacity(0.6), lineWidth: 0.5))
+                .shadow(color: .black.opacity(0.14), radius: 12, y: 4)
+        }
+    }
+}
+
+/// The surround behind pages, shared by the main view, split pane and Pages grid.
+enum PageBackground {
+    static let color = NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(srgbRed: 0.13, green: 0.13, blue: 0.14, alpha: 1)
+            : NSColor(srgbRed: 0.91, green: 0.91, blue: 0.92, alpha: 1)
+    }
+}
+
+enum Radius {
+    static let small: CGFloat = 6
+    static let medium: CGFloat = 10
+    static let large: CGFloat = 14
+}
+
 struct BackToPagePill: View {
     @ObservedObject var editor: EditorController
     let page: Int
@@ -261,9 +283,31 @@ struct BackToPagePill: View {
         }
         .padding(.horizontal, 14)
         .frame(height: 32)
-        .background(.regularMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(.separator.opacity(0.6), lineWidth: 0.5))
-        .shadow(color: .black.opacity(0.14), radius: 10, y: 4)
+        .floatingChrome(Capsule())
+    }
+}
+
+/// "3 of 12" with previous/next, shown over the page while search results exist.
+struct SearchResultsPill: View {
+    @ObservedObject var editor: EditorController
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            Text("\(editor.searchIndex + 1) of \(editor.searchResults.count)").monospacedDigit().font(.callout.weight(.medium))
+            Divider().frame(height: 16)
+            Button { editor.findNext(-1) } label: { Image(systemName: "chevron.up") }
+                .buttonStyle(.plain).help("Previous match (⇧⌘G)").accessibilityLabel("Previous match")
+            Button { editor.findNext() } label: { Image(systemName: "chevron.down") }
+                .buttonStyle(.plain).help("Next match (⌘G)").accessibilityLabel("Next match")
+            Button { editor.searchText = ""; editor.clearSearch() } label: {
+                Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain).help("Clear search").accessibilityLabel("Clear search")
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 32)
+        .floatingChrome(Capsule())
     }
 }
 
@@ -306,8 +350,12 @@ struct SplitPaneView: View {
     private var chooser: some View {
         VStack(spacing: 16) {
             Image(systemName: "rectangle.split.2x1").font(.system(size: 34, weight: .light)).foregroundStyle(Color.accentColor)
-            Text("Open a document to view side by side").font(.title3)
-            Button("Choose Document…") { editor.chooseSplitDocument() }.controlSize(.large).keyboardShortcut(.defaultAction)
+            Text("Show a document side by side").font(.title3)
+            HStack {
+                Button("This Document") { editor.openSplitSameDocument() }.controlSize(.large)
+                    .help("A second view of this document, to compare distant pages")
+                Button("Choose Document…") { editor.chooseSplitDocument() }.controlSize(.large)
+            }
             let recents = NSDocumentController.shared.recentDocumentURLs.filter { $0 != editor.fileURL }.prefix(6)
             if !recents.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
@@ -355,7 +403,7 @@ struct SplitPDFView: NSViewRepresentable {
         view.document = document
         view.autoScales = true
         view.displayMode = .singlePageContinuous
-        view.backgroundColor = .underPageBackgroundColor
+        view.backgroundColor = PageBackground.color
         view.pageShadowsEnabled = true
         editor.attachSplitView(view)
         return view

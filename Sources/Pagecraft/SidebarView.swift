@@ -118,7 +118,7 @@ struct OutlineList: View {
                 } description: {
                     Text("The outline is the document’s table of contents, saved inside the PDF.")
                 } actions: {
-                    Button("Add Item for This Page") { editor.addBookmark() }
+                    Button("Add Item for This Page") { editor.addOutlineItem() }
                 }
             } else {
                 List(nodes, children: \.children) { node in
@@ -126,7 +126,7 @@ struct OutlineList: View {
                 }
                 .listStyle(.sidebar)
                 SidebarFooter {
-                    Button { editor.addBookmark() } label: { Label("Add Item", systemImage: "plus") }
+                    Button { editor.addOutlineItem() } label: { Label("Add Item", systemImage: "plus") }
                         .help("Add an outline item for the current page (⌥⌘D)")
                 }
             }
@@ -343,7 +343,8 @@ private struct AnnotationRow: View {
     let annotation: PDFAnnotation
 
     var body: some View {
-        let detail = Annotations.markedText(annotation, on: page) ?? annotation.contents ?? ""
+        let quote = Annotations.markedText(annotation, on: page) ?? ""
+        let comment = annotation.contents ?? ""
         HStack(alignment: .top, spacing: 8) {
             RoundedRectangle(cornerRadius: 2)
                 .fill(Color(nsColor: Annotations.color(of: annotation)))
@@ -359,8 +360,12 @@ private struct AnnotationRow: View {
                 if let author = annotation.userName, !author.hasPrefix("org.pagecraft") {
                     Text(author).font(.caption2).foregroundStyle(.tertiary)
                 }
-                if !detail.isEmpty {
-                    Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                if !quote.isEmpty {
+                    Text("“\(quote)”").font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                }
+                if !comment.isEmpty, comment != quote {
+                    Label(comment, systemImage: "text.bubble").font(.caption).foregroundStyle(.primary).lineLimit(4)
+                        .labelStyle(.titleAndIcon)
                 }
             }
         }
@@ -382,7 +387,13 @@ struct SearchResultList: View {
     @ObservedObject var editor: EditorController
 
     var body: some View {
-        if editor.searchResults.isEmpty {
+        if editor.searchText.trimmingCharacters(in: .whitespaces).isEmpty {
+            ContentUnavailableView {
+                Label("Search This Document", systemImage: "magnifyingglass")
+            } description: {
+                Text("Type in the search field in the toolbar. Results appear here as you type.")
+            }
+        } else if editor.searchResults.isEmpty {
             ContentUnavailableView.search(text: editor.searchText)
         } else {
             VStack(spacing: 0) {

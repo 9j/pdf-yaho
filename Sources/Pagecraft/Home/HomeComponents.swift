@@ -51,57 +51,36 @@ struct HomeSidebar: View {
     @Binding var selection: HomePage
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            ForEach(Array(HomePage.allCases.enumerated()), id: \.element) { index, page in
-                SidebarRow(page: page, selected: selection == page) { selection = page }
-                    .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .command)
+        VStack(alignment: .leading, spacing: 0) {
+            List(selection: Binding(get: { selection }, set: { if let page = $0 { selection = page } })) {
+                ForEach(HomePage.allCases, id: \.self) { page in
+                    Label(page.title, systemImage: selection == page ? page.filledSymbol : page.symbol)
+                        .tag(page)
+                }
             }
-            Spacer()
+            .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
+            .padding(.top, 38)
             Text("Pagecraft \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev")")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
-                .padding(.horizontal, 10)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 16)
         }
-        .padding(.horizontal, 10)
-        .padding(.top, 52)
-        .padding(.bottom, 16)
         .frame(width: 210)
         .frame(maxHeight: .infinity)
         .background(SidebarMaterial())
         .overlay(alignment: .trailing) {
             Rectangle().fill(Color.primary.opacity(0.1)).frame(width: 0.5)
         }
-    }
-}
-
-private struct SidebarRow: View {
-    let page: HomePage
-    let selected: Bool
-    let action: () -> Void
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                Image(systemName: selected ? page.filledSymbol : page.symbol)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(Color.accentColor)
-                    .frame(width: 20)
-                Text(page.title)
-                    .font(.system(size: 13, weight: selected ? .semibold : .regular))
-                Spacer(minLength: 0)
+        // ⌘1–⌘4 switch pages.
+        .background {
+            ForEach(Array(HomePage.allCases.enumerated()), id: \.element) { index, page in
+                Button("") { selection = page }
+                    .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .command)
+                    .hidden()
             }
-            .padding(.horizontal, 10)
-            .frame(height: 32)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color.primary.opacity(selected ? 0.1 : hovering ? 0.05 : 0))
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 

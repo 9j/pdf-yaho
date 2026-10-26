@@ -296,7 +296,7 @@ struct ScanBar: View {
             PaletteButton(symbol: "crop", label: "Crop", help: "Crop pages (C)", selected: editor.tool == .crop) {
                 editor.beginCrop()
             }
-            PaletteButton(symbol: "arrow.up.left.and.arrow.down.right", label: "Size", help: "Change page size", selected: false) {
+            PaletteButton(symbol: "rectangle.portrait.arrowtriangle.2.outward", label: "Size", help: "Change page size", selected: false) {
                 editor.showPageSize = true
             }
             PaletteButton(symbol: "rectangle.split.2x1", label: "Split", help: "Split two-page scans (book spreads) into single pages", selected: false) {
@@ -531,6 +531,11 @@ private struct SliderRow: View {
 }
 
 struct Swatch: View {
+    static func name(of color: NSColor) -> String {
+        let names = ["Black", "Grey", "Red", "Orange", "Yellow", "Green", "Teal", "Blue", "Indigo", "Purple", "Pink", "White"]
+        return Palette.swatches.firstIndex { Palette.same($0, color) }.map { names[$0] } ?? "Custom colour"
+    }
+
     let color: NSColor
     let selected: Bool
     var size: CGFloat = 26

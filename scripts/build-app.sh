@@ -25,6 +25,8 @@ cat > "$app/Contents/Info.plist" <<PLIST
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key><string>Pagecraft</string>
+    <key>CFBundleDevelopmentRegion</key><string>en</string>
+    <key>CFBundleLocalizations</key><array><string>en</string></array>
     <key>CFBundleIdentifier</key><string>org.pagecraft.Pagecraft</string>
     <key>CFBundleName</key><string>Pagecraft</string>
     <key>CFBundleDisplayName</key><string>Pagecraft</string>

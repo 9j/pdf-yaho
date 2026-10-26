@@ -109,9 +109,7 @@ struct CropBar: View {
         .controlSize(.regular)
         .padding(.horizontal, 12)
         .frame(height: 44)
-        .background(.regularMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(.separator.opacity(0.6), lineWidth: 0.5))
-        .shadow(color: .black.opacity(0.16), radius: 12, y: 4)
+        .floatingChrome(Capsule())
     }
 }
 
@@ -168,8 +166,10 @@ struct AnnotationContextBar: View {
                     Text(note).lineLimit(1).font(.callout).frame(maxWidth: 220).padding(.horizontal, 6)
                         .foregroundStyle(.secondary)
                 }
-                if ["FreeText", "Text"].contains(a.type ?? "") {
+                if ["FreeText", "Text"].contains(a.type ?? "") || a is CalloutAnnotation {
                     BarButton(symbol: "pencil", label: "Edit") { editor.beginEditingSelected() }
+                } else if !Annotations.isRedaction(a), a.type != "Link" {
+                    CommentButton(editor: editor, selection: selected)
                 }
                 if Annotations.isMovable(a) {
                     BarButton(symbol: "plus.square.on.square", label: "Duplicate") { editor.duplicateSelected() }
@@ -205,9 +205,7 @@ struct AnnotationContextBar: View {
             }
             .padding(.horizontal, 6)
             .frame(height: 36)
-            .background(.regularMaterial, in: Capsule())
-            .overlay(Capsule().strokeBorder(.separator.opacity(0.6), lineWidth: 0.5))
-            .shadow(color: .black.opacity(0.16), radius: 10, y: 4)
+            .floatingChrome(Capsule())
         }
     }
 }
@@ -242,9 +240,44 @@ struct TextSelectionMenu: View {
         }
         .padding(.horizontal, 4)
         .frame(height: 36)
-        .background(.regularMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(.separator.opacity(0.6), lineWidth: 0.5))
-        .shadow(color: .black.opacity(0.16), radius: 10, y: 4)
+        .floatingChrome(Capsule())
+    }
+}
+
+/// Adds or edits the comment attached to a highlight, shape or stamp.
+struct CommentButton: View {
+    @ObservedObject var editor: EditorController
+    let selection: SelectedAnnotation
+    @State private var open = false
+    @State private var draft = ""
+
+    var body: some View {
+        let hasComment = !(selection.annotation.contents ?? "").isEmpty
+        BarButton(symbol: hasComment ? "text.bubble.fill" : "text.bubble", label: hasComment ? "Edit Comment" : "Add Comment") {
+            draft = hasComment ? (selection.annotation.contents ?? "") : ""
+            open = true
+        }
+        .popover(isPresented: $open, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Comment").font(.headline)
+                TextEditor(text: $draft)
+                    .font(.body)
+                    .frame(width: 260, height: 90)
+                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
+                HStack {
+                    if hasComment {
+                        Button("Remove", role: .destructive) { editor.setComment("", of: selection.annotation, on: selection.page); open = false }
+                    }
+                    Spacer()
+                    Button("Done") {
+                        editor.setComment(draft.trimmingCharacters(in: .whitespacesAndNewlines), of: selection.annotation, on: selection.page)
+                        open = false
+                    }
+                    .keyboardShortcut(.defaultAction)
+                }
+            }
+            .padding(14)
+        }
     }
 }
 
@@ -264,6 +297,7 @@ struct BarButton: View {
         }
         .buttonStyle(HoverButtonStyle())
         .help(label)
+        .accessibilityLabel(label)
     }
 }
 
@@ -286,7 +320,8 @@ struct PageHUD: View {
         HStack(spacing: 4) {
             BarButton(symbol: "chevron.up", label: "Previous Page") { editor.goToPage(editor.currentPageIndex - 1) }
                 .disabled(editor.currentPageIndex == 0)
-            TextField("", text: $pageText)
+            TextField("Page", text: $pageText)
+                .labelsHidden()
                 .textFieldStyle(.plain)
                 .multilineTextAlignment(.center)
                 .monospacedDigit()
@@ -321,9 +356,7 @@ struct PageHUD: View {
         .font(.callout)
         .padding(.horizontal, 8)
         .frame(height: 38)
-        .background(.regularMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(.separator.opacity(0.6), lineWidth: 0.5))
-        .shadow(color: .black.opacity(0.14), radius: 12, y: 4)
+        .floatingChrome(Capsule())
         .onHover { editor.hudHovered = $0 }
         .onAppear { pageText = "\(editor.currentPageIndex + 1)" }
         .onChange(of: editor.currentPageIndex) { _, index in if !pageFocused { pageText = "\(index + 1)" } }
@@ -339,7 +372,13 @@ struct ToastView: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+            Group {
+                switch toast.kind {
+                case .success: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                case .info: Image(systemName: "info.circle.fill").foregroundStyle(Color.accentColor)
+                case .warning: Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                }
+            }
             Text(toast.message)
             if let url = toast.url {
                 Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
@@ -349,8 +388,6 @@ struct ToastView: View {
         .font(.callout)
         .padding(.horizontal, 14)
         .frame(height: 36)
-        .background(.regularMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(.separator.opacity(0.6), lineWidth: 0.5))
-        .shadow(color: .black.opacity(0.16), radius: 12, y: 4)
+        .floatingChrome(Capsule())
     }
 }

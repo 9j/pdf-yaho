@@ -61,6 +61,17 @@ struct DocumentView: View {
             }
         }
         .onSubmit(of: .search) { editor.search() }
+        // Live search: run shortly after typing stops.
+        .task(id: editor.searchText) {
+            guard editor.searchText.trimmingCharacters(in: .whitespaces).count >= 2 else { return }
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            editor.search(remember: false)
+        }
+        .onChange(of: editor.revealSidebar) { _, reveal in
+            if reveal, editor.mode != .pages, columns == .detailOnly { withAnimation { columns = .all } }
+            editor.revealSidebar = false
+        }
         .onChange(of: editor.searchText) { _, text in if text.isEmpty { editor.clearSearch() } }
         .onChange(of: editor.mode) { old, mode in
             if mode == .pages { columnsBeforePages = columns; withAnimation { columns = .detailOnly } }
@@ -121,6 +132,10 @@ struct DocumentView: View {
                 .overlay { DocumentOverlays(editor: editor) }
                 .overlay(alignment: .top) {
                     VStack(spacing: 8) {
+                        if !editor.searchResults.isEmpty {
+                            SearchResultsPill(editor: editor)
+                                .transition(.move(edge: .top).combined(with: .opacity))
+                        }
                         if let target = editor.backTarget {
                             BackToPagePill(editor: editor, page: target)
                                 .transition(.move(edge: .top).combined(with: .opacity))
@@ -128,6 +143,7 @@ struct DocumentView: View {
                     }
                     .padding(.top, 12)
                     .animation(.snappy(duration: 0.2), value: editor.backTarget)
+                    .animation(.snappy(duration: 0.2), value: editor.searchResults.isEmpty)
                 }
                 .overlay(alignment: .bottom) {
                     PageHUD(editor: editor)

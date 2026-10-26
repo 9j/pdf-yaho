@@ -614,11 +614,7 @@ struct PDFKitView: NSViewRepresentable {
     func makeNSView(context: Context) -> EditorPDFView {
         let view = EditorPDFView()
         view.autoScales = true
-        view.backgroundColor = NSColor(name: nil) { appearance in
-            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-                ? NSColor(srgbRed: 0.13, green: 0.13, blue: 0.14, alpha: 1)
-                : NSColor(srgbRed: 0.91, green: 0.91, blue: 0.92, alpha: 1)
-        }
+        view.backgroundColor = PageBackground.color
         view.pageShadowsEnabled = true
         view.pageBreakMargins = NSEdgeInsets(top: 12, left: 20, bottom: 12, right: 20)
         editor.attach(view)

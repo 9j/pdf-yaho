@@ -27,7 +27,7 @@ enum EditorMode: String, CaseIterable, Identifiable {
         case .read: "book"
         case .annotate: "highlighter"
         case .draw: "pencil.and.scribble"
-        case .fillSign: "signature"
+        case .fillSign: "rectangle.and.pencil.and.ellipsis"
         case .measure: "ruler"
         case .redact: "eye.slash"
         case .scan: "doc.viewfinder"
@@ -95,7 +95,7 @@ enum Tool: String, CaseIterable, Identifiable {
         case .highlight: "Highlight"
         case .underline: "Underline"
         case .squiggly: "Squiggly"
-        case .strikeout: "Strike"
+        case .strikeout: "Strikeout"
         case .pen: "Pen"
         case .marker: "Marker"
         case .text: "Text"
@@ -154,12 +154,12 @@ enum Tool: String, CaseIterable, Identifiable {
         case .note: "note.text"
         case .callout: "text.bubble"
         case .cloud: "cloud"
-        case .cloudPolygon: "cloud.fill"
+        case .cloudPolygon: "cloud.bolt"
         case .rectangle: "rectangle"
         case .oval: "circle"
         case .line: "line.diagonal"
         case .arrow: "arrow.up.right"
-        case .doubleArrow: "arrow.up.left.and.arrow.down.right"
+        case .doubleArrow: "arrow.left.and.right"
         case .polygon: "pentagon"
         case .polyline: "point.topleft.down.to.point.bottomright.curvepath"
         case .signature: "signature"
@@ -169,7 +169,7 @@ enum Tool: String, CaseIterable, Identifiable {
         case .stamp: "seal"
         case .image: "photo"
         case .link: "link"
-        case .measureDistance: "ruler"
+        case .measureDistance: "line.diagonal.arrow"
         case .measurePerimeter: "point.3.connected.trianglepath.dotted"
         case .measureArea: "square.dashed"
         case .formText: "rectangle.and.pencil.and.ellipsis"
@@ -325,9 +325,11 @@ struct SelectedAnnotation: Equatable {
 }
 
 struct Toast: Identifiable, Equatable {
+    enum Kind { case success, info, warning }
     let id = UUID()
     let message: String
     var url: URL?
+    var kind: Kind = .success
 }
 
 enum Palette {
@@ -363,14 +365,14 @@ enum ReadingTheme: String, CaseIterable, Identifiable {
 }
 
 enum SidebarTab: String, CaseIterable, Identifiable {
-    case thumbnails = "Pages", bookmarks = "Bookmarks", outline = "Outline", annotations = "Annotations", search = "Search"
+    case thumbnails = "Thumbnails", bookmarks = "Bookmarks", outline = "Outline", annotations = "Annotations", search = "Search"
     var id: String { rawValue }
     var symbol: String {
         switch self {
-        case .thumbnails: "square.grid.2x2"
+        case .thumbnails: "rectangle.grid.1x2"
         case .bookmarks: "bookmark"
         case .outline: "list.bullet.indent"
-        case .annotations: "highlighter"
+        case .annotations: "text.bubble"
         case .search: "magnifyingglass"
         }
     }
@@ -643,6 +645,15 @@ final class EditorController: ObservableObject {
 
     func closeSplit() { split = nil }
 
+    /// Two views of this same document, for comparing distant pages.
+    func openSplitSameDocument() {
+        var state = split ?? SplitState(vertical: false)
+        state.document = document
+        state.title = "\(title) (second view)"
+        state.sync = false
+        split = state
+    }
+
     func chooseSplitDocument() {
         guard let url = Prompt.open([.pdf], multiple: false, title: "Open in Split View").first else { return }
         openSplitDocument(url)
@@ -733,8 +744,12 @@ final class EditorController: ObservableObject {
         return image
     }
 
-    func showToast(_ message: String, url: URL? = nil) {
-        let toast = Toast(message: message, url: url)
+    func showToast(_ message: String, url: URL? = nil, kind: Toast.Kind? = nil) {
+        let warningWords = ["can't", "can’t", "couldn", "no ", "nothing", "needs at least", "not supported", "no legible"]
+        let inferred: Toast.Kind = kind ?? (warningWords.contains { message.lowercased().contains($0) } ? .warning : .success)
+        let toast = Toast(message: message, url: url, kind: inferred)
+        NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested,
+                             userInfo: [.announcement: message, .priority: NSAccessibilityPriorityLevel.high.rawValue])
         withAnimation(.snappy) { self.toast = toast }
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { [weak self] in
             guard self?.toast == toast else { return }
@@ -1010,19 +1025,42 @@ final class EditorController: ObservableObject {
 
     func applyMarkup(_ type: PDFAnnotationSubtype, to selection: PDFSelection, tool markupTool: Tool? = nil) {
         let color = style(for: markupTool ?? tool.markupType.map { _ in tool } ?? .highlight).color
+        // Gather line rectangles per page so a multi-line selection becomes one annotation per page.
+        var linesByPage: [(page: PDFPage, rects: [CGRect])] = []
         for line in selection.selectionsByLine() {
             for page in line.pages {
                 let bounds = line.bounds(for: page)
                 guard bounds.width > 0.5, bounds.height > 0.5 else { continue }
-                let a = type == SquigglyAnnotation.subtype
-                    ? Annotations.squiggly(bounds: bounds, color: color)
-                    : Annotations.markup(type, bounds: bounds, color: color)
-                add(a, to: page)
+                if let i = linesByPage.firstIndex(where: { $0.page === page }) { linesByPage[i].rects.append(bounds) }
+                else { linesByPage.append((page, [bounds])) }
             }
         }
+        var last: SelectedAnnotation?
+        for (page, rects) in linesByPage {
+            if type == SquigglyAnnotation.subtype {
+                for rect in rects { add(Annotations.squiggly(bounds: rect, color: color), to: page) }
+            } else if let a = Annotations.markup(type, lines: rects, color: color) {
+                add(a, to: page)
+                last = SelectedAnnotation(annotation: a, page: page)
+            }
+        }
+        lastMarkup = last
         undoManager?.setActionName(type == .highlight ? "Highlight" : type == .underline ? "Underline" : type == .strikeOut ? "Strikeout" : "Squiggly")
         pdfView?.clearSelection()
         textSelectionActive = false
+    }
+
+    /// The markup just created, so the text-selection menu can offer "Add Comment".
+    var lastMarkup: SelectedAnnotation?
+
+    /// A comment (the annotation's contents) on any annotation: highlights, shapes, stamps…
+    func setComment(_ text: String, of annotation: PDFAnnotation, on page: PDFPage) {
+        let previous = annotation.contents ?? ""
+        guard previous != text else { return }
+        annotation.contents = text
+        registerUndo(text.isEmpty ? "Remove Comment" : "Edit Comment") { $0.setComment(previous, of: annotation, on: page) }
+        changed([page])
+        objectWillChange.send()
     }
 
     /// Markup from the floating text-selection menu.
@@ -1688,7 +1726,7 @@ final class EditorController: ObservableObject {
         changed()
     }
 
-    func addBookmark(label: String? = nil, page index: Int? = nil) {
+    func addOutlineItem(label: String? = nil, page index: Int? = nil) {
         let index = index ?? currentPageIndex
         guard let page = document.page(at: index) else { return }
         let hadRoot = document.outlineRoot != nil
@@ -1698,13 +1736,13 @@ final class EditorController: ObservableObject {
         item.label = label ?? "Page \(index + 1)"
         item.destination = PDFDestination(page: page, at: CGPoint(x: 0, y: page.bounds(for: .cropBox).maxY))
         root.insertChild(item, at: root.numberOfChildren)
-        registerUndo("Add Bookmark") { editor in
+        registerUndo("Add Outline Item") { editor in
             item.removeFromParent()
             if !hadRoot { editor.document.outlineRoot = nil }
             editor.changed()
         }
         changed()
-        if label == nil { showToast("Bookmarked page \(index + 1)") }
+        if label == nil { showToast("Added “Page \(index + 1)” to the outline") }
     }
 
     func deleteOutlineItem(_ item: PDFOutline) {
@@ -1785,6 +1823,8 @@ final class EditorController: ObservableObject {
         guard let view = pdfView else { return }
         view.wantsLayer = true
         view.layerUsesCoreImageFilters = true
+        // Night inverts everything, so give it a light surround that inverts to dark.
+        view.backgroundColor = theme == .night ? NSColor(white: 0.86, alpha: 1) : PageBackground.color
         switch theme {
         case .day:
             view.contentFilters = []
@@ -1802,17 +1842,24 @@ final class EditorController: ObservableObject {
 
     // MARK: Search
 
-    func search() {
+    /// Asks the window to show the sidebar (used when search results arrive).
+    @Published var revealSidebar = false
+
+    /// - Parameter remember: adds the query to search history (on Return, not while typing).
+    func search(remember: Bool = true) {
         let query = searchText.trimmingCharacters(in: .whitespaces)
         guard !query.isEmpty else { clearSearch(); return }
-        searchHistory = Array(([query] + searchHistory.filter { $0 != query }).prefix(10))
-        UserDefaults.standard.set(searchHistory, forKey: "searchHistory")
+        if remember {
+            searchHistory = Array(([query] + searchHistory.filter { $0 != query }).prefix(10))
+            UserDefaults.standard.set(searchHistory, forKey: "searchHistory")
+        }
         if mode == .pages { mode = .read }
         searchResults = Search.find(query, in: document, matchCase: searchMatchCase, wholeWords: searchWholeWords)
         for result in searchResults { result.color = NSColor.systemYellow.withAlphaComponent(0.55) }
         pdfView?.highlightedSelections = searchResults
         searchIndex = 0
         sidebarTab = .search
+        if !searchResults.isEmpty { revealSidebar = true }
         if let first = searchResults.first { go(to: first) }
     }
 
@@ -1852,7 +1899,7 @@ final class EditorController: ObservableObject {
     func recognizeText() {
         let scanned = PDFOps.pages(of: document).filter { ($0.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count
         guard scanned > 0 else {
-            showToast("Every page already has selectable text")
+            showToast("Every page already has selectable text", kind: .info)
             return
         }
         guard let data = document.dataRepresentation() else { return }

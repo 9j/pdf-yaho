@@ -10,6 +10,7 @@ struct PageGridView: View {
     @State private var dropTarget: Int?
 
     var body: some View {
+        GeometryReader { geo in
         ScrollView {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: size, maximum: size * 1.25), spacing: 26, alignment: .top)],
                       spacing: 30) {
@@ -17,7 +18,10 @@ struct PageGridView: View {
                     PageCell(editor: editor, index: index, size: size,
                              selected: editor.selectedPages.contains(index), dropTarget: dropTarget == index)
                         .onTapGesture(count: 2) { open(index) }
-                        .onTapGesture { click(index) }
+                        .simultaneousGesture(TapGesture().onEnded { click(index) })
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Page \(index + 1)")
+                        .accessibilityAddTraits(editor.selectedPages.contains(index) ? [.isButton, .isSelected] : .isButton)
                         .draggable(PageDrag(indices: dragIndices(for: index))) {
                             PageDragPreview(editor: editor, indices: dragIndices(for: index))
                         }
@@ -30,26 +34,27 @@ struct PageGridView: View {
                 }
             }
             .padding(.horizontal, 36)
-            .padding(.top, 28)
-            .padding(.bottom, 110)
+            .padding(.top, 24)
+            .padding(.bottom, 40)
         }
-        .background(Color(nsColor: NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            ? NSColor(srgbRed: 0.13, green: 0.13, blue: 0.14, alpha: 1) : NSColor(srgbRed: 0.91, green: 0.91, blue: 0.92, alpha: 1) }))
+        .onAppear { editor.pagesPerRow = columns(for: geo.size.width) }
+        .onChange(of: geo.size.width) { _, width in editor.pagesPerRow = columns(for: width) }
+        .onChange(of: size) { _, _ in editor.pagesPerRow = columns(for: geo.size.width) }
+        }
+        .background(Color(nsColor: PageBackground.color))
         .contentShape(Rectangle())
         .onTapGesture { editor.selectedPages = [] }
-        .overlay(alignment: .bottom) {
-            PagesActionBar(editor: editor, size: $size).padding(.bottom, 18)
+        // Keys (⌫, ⌘C/⌘X/⌘V, arrows, Return) are handled by the document view, which keeps focus.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            VStack(spacing: 0) {
+                PagesActionBar(editor: editor, size: $size).background(.bar)
+                Divider()
+            }
         }
-        .onDeleteCommand { editor.deletePages() }
-        .onCopyCommand {
-            editor.copyPages()
-            return []
-        }
-        .onCutCommand {
-            editor.cutPages()
-            return []
-        }
-        .onPasteCommand(of: [.pdf, .image]) { _ in editor.insertFromClipboard() }
+    }
+
+    private func columns(for width: CGFloat) -> Int {
+        max(1, Int((width - 72 + 26) / (size + 26)))
     }
 
     private func dragIndices(for index: Int) -> [Int] {
@@ -117,14 +122,7 @@ private struct PageCell: View {
                 }
                 if editor.isBookmarked(index) {
                     Image(systemName: "bookmark.fill").font(.system(size: 16)).foregroundStyle(.red)
-                        .padding(.trailing, selected ? 26 : 14)
-                }
-                if selected {
-                    Image(systemName: "checkmark.circle.fill")
-                        .symbolRenderingMode(.palette)
-                        .foregroundStyle(.white, Color.accentColor)
-                        .font(.system(size: 20))
-                        .offset(x: 8, y: -8)
+                        .padding(.trailing, 14)
                 }
             }
             .frame(height: size * 1.35 + 10, alignment: .bottom)
@@ -160,6 +158,7 @@ private struct PageDragPreview: View {
     }
 }
 
+/// Page actions for Pages mode, in the same labelled style as the toolset bars.
 private struct PagesActionBar: View {
     @ObservedObject var editor: EditorController
     @Binding var size: Double
@@ -167,80 +166,69 @@ private struct PagesActionBar: View {
     private var count: Int { editor.selectedPages.count }
 
     var body: some View {
-        HStack(spacing: 4) {
+        ViewThatFits(in: .horizontal) {
+            content
+            content.environment(\.paletteCompact, true)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 4)
+    }
+
+    private var content: some View {
+        HStack(spacing: 2) {
             Text(count == 0 ? "\(editor.pageCount) pages" : "\(count) of \(editor.pageCount) selected")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
+                .font(.callout).foregroundStyle(.secondary).monospacedDigit()
                 .frame(minWidth: 120)
-            Divider().frame(height: 20)
-            ActionButton(symbol: "rotate.left", label: "Rotate Left") { editor.rotate(-90) }.disabled(count == 0)
-            ActionButton(symbol: "rotate.right", label: "Rotate Right") { editor.rotate(90) }.disabled(count == 0)
-            ActionButton(symbol: "doc.badge.plus", label: "Insert Blank Page") { editor.insertBlankPage() }
-            ActionButton(symbol: "square.and.arrow.down.on.square", label: "Insert from File…") { Exporter.insertFromFile(editor) }
-            ActionButton(symbol: "square.and.arrow.up.on.square", label: "Extract…") {
+            Divider().frame(height: 26).padding(.horizontal, 3)
+            Menu {
+                Button("Blank Page") { editor.insertBlankPage() }
+                Button("From File…") { Exporter.insertFromFile(editor) }
+                Button("From Images…") { editor.insertImages() }
+                Button("From Clipboard") { editor.insertFromClipboard() }
+            } label: {
+                PaletteLabel(symbol: "plus.rectangle.on.rectangle", label: "Insert", selected: false, showsChevron: true)
+            } primaryAction: {
+                editor.insertBlankPage()
+            }
+            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+            .help("Insert a blank page after the selection; more options in the menu")
+            PaletteButton(symbol: "rotate.left", label: "Left", help: "Rotate left (⌘L)", selected: false) { editor.rotate(-90) }
+                .disabled(count == 0)
+            PaletteButton(symbol: "rotate.right", label: "Right", help: "Rotate right (⌘R)", selected: false) { editor.rotate(90) }
+                .disabled(count == 0)
+            PaletteButton(symbol: "plus.square.on.square", label: "Duplicate", help: "Duplicate selected pages", selected: false) { editor.duplicatePages() }
+                .disabled(count == 0)
+            PaletteButton(symbol: "doc.on.doc", label: "Copy", help: "Copy pages (⌘C)", selected: false) { editor.copyPages() }
+                .disabled(count == 0)
+            PaletteButton(symbol: "doc.on.clipboard", label: "Paste", help: "Paste pages after the selection (⌘V)", selected: false) { editor.insertFromClipboard() }
+            PaletteButton(symbol: "rectangle.portrait.and.arrow.right", label: "Extract", help: "Save the selected pages as a new PDF", selected: false) {
                 Exporter.extract(editor, indices: editor.targetPageIndices)
             }
             .disabled(count == 0)
-            ActionButton(symbol: "trash", label: "Delete", destructive: true) { editor.deletePages() }
+            PaletteButton(symbol: "trash", label: "Delete", help: "Delete selected pages (⌫)", selected: false) { editor.deletePages() }
                 .disabled(count == 0 || count == editor.pageCount)
             Menu {
-                Section("Insert") {
-                    Button("From Images…") { editor.insertImages() }
-                    Button("From Clipboard") { editor.insertFromClipboard() }
-                }
-                Button("Duplicate") { editor.duplicatePages() }.disabled(count == 0)
-                Button("Copy Pages") { editor.copyPages() }.disabled(count == 0)
-                Button("Paste Pages") { editor.insertFromClipboard() }
                 Button("Reverse Order") { editor.reversePages() }
                 Divider()
                 Button("Crop…") { editor.beginCrop() }
                 Button("Clear Margins") { editor.autoCrop() }.disabled(count == 0)
                 Button("Page Size…") { editor.showPageSize = true }
-                Button("Split…") { editor.showSplit = true }
+                Button("Split Document…") { editor.showSplit = true }
                 Divider()
                 Button("Page Numbers…") { editor.headerFooterPreset = .pageNumbers }
                 Button("Header & Footer…") { editor.headerFooterPreset = .custom }
                 Button("Bates Numbering…") { editor.headerFooterPreset = .bates }
             } label: {
-                Image(systemName: "ellipsis.circle").font(.system(size: 15, weight: .medium)).frame(width: 34, height: 32)
+                PaletteLabel(symbol: "ellipsis.circle", label: "More", selected: false, showsChevron: true)
             }
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help("More page tools")
-            Divider().frame(height: 20)
+            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+            Divider().frame(height: 26).padding(.horizontal, 3)
             Image(systemName: "square.grid.3x3").font(.caption).foregroundStyle(.secondary)
             Slider(value: $size, in: 120...320).frame(width: 90).controlSize(.small)
+                .accessibilityLabel("Thumbnail size")
             Image(systemName: "square.grid.2x2").foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 12)
-        .frame(height: 46)
-        .background(.regularMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(.separator.opacity(0.6), lineWidth: 0.5))
-        .shadow(color: .black.opacity(0.16), radius: 14, y: 6)
-    }
-}
-
-private struct ActionButton: View {
-    let symbol: String
-    let label: String
-    var destructive = false
-    let action: () -> Void
-    @Environment(\.isEnabled) private var isEnabled
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(destructive && isEnabled ? Color.red : .primary)
-                .frame(width: 34, height: 32)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(HoverButtonStyle())
-        .opacity(isEnabled ? 1 : 0.35)
-        .help(label)
+        .fixedSize()
     }
 }
 
@@ -260,7 +248,8 @@ struct PageMenu: View {
         Button("Copy") { editor.selectedPages = Set(indices); editor.copyPages() }
         Button("Paste After") { editor.selectedPages = [index]; editor.insertFromClipboard() }
         Button("Extract…") { Exporter.extract(editor, indices: indices) }
-        Button("Add Bookmark") { editor.addBookmark(page: index) }
+        Button(editor.isBookmarked(index) ? "Remove Bookmark" : "Bookmark Page") { editor.toggleBookmark(index) }
+        Button("Add to Outline") { editor.addOutlineItem(page: index) }
         Divider()
         Button(indices.count == 1 ? "Delete Page" : "Delete \(indices.count) Pages", role: .destructive) {
             editor.deletePages(indices)
