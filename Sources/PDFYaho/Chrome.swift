@@ -24,6 +24,15 @@ enum Preferences {
     static var openInTabs: Bool { defaults.object(forKey: "openInTabs") as? Bool ?? true }
     static var showSidebar: Bool { defaults.object(forKey: "showSidebar") as? Bool ?? true }
     static var showHomeWhenIdle: Bool { defaults.object(forKey: "showHomeWhenIdle") as? Bool ?? true }
+    /// AppKit's own switch (System Settings ▸ Desktop & Dock ▸ "Ask to keep changes when closing documents"),
+    /// read from this app's defaults first: with it on, closing an edited document asks Save, Don't Save or Cancel
+    /// instead of silently keeping the autosaved changes. On unless turned off in Settings.
+    static let confirmCloseKey = "NSCloseAlwaysConfirmsChanges"
+
+    static func applyCloseConfirmation() {
+        if defaults.object(forKey: confirmCloseKey) == nil { defaults.set(true, forKey: confirmCloseKey) }
+    }
+
     static var pageIndicator: PageIndicator {
         PageIndicator(rawValue: defaults.string(forKey: "pageIndicator") ?? "") ?? .automatic
     }

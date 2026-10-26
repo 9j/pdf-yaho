@@ -115,5 +115,53 @@ extension EditorController {
         }
     }
 }
+
+extension EditorController {
+    /// Runs comma-separated steps a second apart (a mode name, or tool:<name>) and logs whether the signature pad opened.
+    func runStepsQA(_ steps: String) {
+        let url = URL(fileURLWithPath: "/tmp/pdfyaho-qa.log")
+        func log(_ line: String) {
+            let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+            try? (text + line + "\n").write(to: url, atomically: true, encoding: .utf8)
+        }
+        for (i, step) in steps.split(separator: ",").map(String.init).enumerated() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5 + Double(i)) { [self] in
+                if step.hasPrefix("tool:"), let tool = Tool(rawValue: String(step.dropFirst(5))) { self.tool = tool }
+                else if step == "dismiss" { showSignaturePad = false }
+                else if step == "rotate" {
+                    rotate(90)
+                    let doc = pdfView?.window.flatMap { NSDocumentController.shared.document(for: $0) }
+                    log("right after rotate: edited=\(doc?.isDocumentEdited as Any) undo=\(undoManager?.canUndo as Any) docUndo=\(doc?.undoManager?.canUndo as Any) same=\(doc?.undoManager === undoManager)")
+                }
+                else if step == "undo" { undoManager?.undo() }
+                else if step == "mark" {
+                    let doc = pdfView?.window.flatMap { NSDocumentController.shared.document(for: $0) }
+                    doc?.updateChangeCount(.changeDone)
+                    log("mark: edited=\(doc?.isDocumentEdited as Any) grouping=\(undoManager?.groupingLevel as Any) byEvent=\(undoManager?.groupsByEvent as Any)")
+                }
+                else if step == "check" {
+                    let doc = pdfView?.window.flatMap { NSDocumentController.shared.document(for: $0) }
+                    log("check: edited=\(doc?.isDocumentEdited as Any) unautosaved=\(doc?.hasUnautosavedChanges as Any) title=\(pdfView?.window?.title ?? "") edited-dot=\(pdfView?.window?.isDocumentEdited as Any)")
+                }
+                else if step == "close" {
+                    let doc = pdfView?.window.flatMap { NSDocumentController.shared.document(for: $0) }
+                    log("before close: edited=\(doc?.isDocumentEdited as Any) autosaves=\(doc.map { type(of: $0).autosavesInPlace } as Any) class=\(doc.map { String(describing: type(of: $0)) } ?? "nil") confirm=\(UserDefaults.standard.bool(forKey: "NSCloseAlwaysConfirmsChanges"))")
+                    pdfView?.window?.performClose(nil)
+                }
+                else if step.hasPrefix("key:"), let view = pdfView, let window = view.window {
+                    window.makeFirstResponder(view)
+                    let chars = String(step.dropFirst(4))
+                    if let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                                                    windowNumber: window.windowNumber, context: nil, characters: chars,
+                                                    charactersIgnoringModifiers: chars, isARepeat: false, keyCode: 5) {
+                        view.keyDown(with: event)
+                    }
+                }
+                else if let mode = EditorMode(rawValue: step) { self.mode = mode }
+                log("\(step) → mode \(mode) tool \(tool) pad \(showSignaturePad)")
+            }
+        }
+    }
+}
 #endif
 

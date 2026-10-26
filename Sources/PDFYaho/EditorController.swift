@@ -757,6 +757,13 @@ final class EditorController: ObservableObject {
             MainActor.assumeIsolated { action(target) }
         }
         undoManager?.setActionName(name)
+        // The undo group (and so the document's edited state, autosave and the save prompt on close) only
+        // closes when the event loop finishes an event. Edits applied from a delayed block have no event, so
+        // post an empty one.
+        if let event = NSEvent.otherEvent(with: .applicationDefined, location: .zero, modifierFlags: [], timestamp: 0,
+                                          windowNumber: 0, context: nil, subtype: 0, data1: 0, data2: 0) {
+            NSApp.postEvent(event, atStart: false)
+        }
     }
 
     func thumbnail(for index: Int, side: CGFloat = 240) -> NSImage? {

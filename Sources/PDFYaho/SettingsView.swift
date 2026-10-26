@@ -16,6 +16,7 @@ struct SettingsView: View {
 private struct GeneralSettings: View {
     @AppStorage("openInTabs") private var openInTabs = true
     @AppStorage("showHomeWhenIdle") private var showHome = true
+    @AppStorage(Preferences.confirmCloseKey) private var confirmClose = true
     @State private var isDefault = false
 
     var body: some View {
@@ -25,6 +26,7 @@ private struct GeneralSettings: View {
                 Text("Separate windows").tag(false)
             }
             Toggle("Show Home when no documents are open", isOn: $showHome)
+            Toggle("Ask to save changes when closing a document", isOn: $confirmClose)
             LabeledContent("Default PDF app") {
                 if isDefault {
                     Label("PDF Yaho is the default", systemImage: "checkmark.circle.fill").foregroundStyle(.green)

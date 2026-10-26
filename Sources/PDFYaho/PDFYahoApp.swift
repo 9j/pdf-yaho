@@ -6,6 +6,10 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate {
     /// DocumentGroup creates an untitled document at launch. Replace it with the Welcome window,
     /// or just drop it when the app was launched to open a file.
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        Preferences.applyCloseConfirmation()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
             for document in NSDocumentController.shared.documents where document.fileURL == nil && !document.isDocumentEdited {
