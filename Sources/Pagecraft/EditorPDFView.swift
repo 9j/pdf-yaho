@@ -132,11 +132,11 @@ final class EditorPDFView: PDFView {
             editor.placeStamp(at: point, on: page)
         case .eraser:
             if let a = hit(point, on: page) { editor.erase(a, on: page) }
-        case .polygon, .polyline:
+        case .polygon, .polyline, .measurePerimeter, .measureArea:
             editor.select(nil)
             addPoint(point, on: page, finish: event.clickCount >= 2)
         case .pen, .marker, .rectangle, .oval, .line, .arrow, .doubleArrow, .redact, .link, .image, .snapshot,
-             .formText, .formCheckbox, .formRadio, .formChoice:
+             .formText, .formCheckbox, .formRadio, .formChoice, .measureDistance:
             editor.select(nil)
             drag = .draw(page: page, start: point, stroke: [point])
         case .crop:
@@ -165,7 +165,7 @@ final class EditorPDFView: PDFView {
         guard let editor, let (page, list) = points else { return }
         points = nil
         showPreview(nil, on: nil)
-        let closed = editor.tool == .polygon
+        let closed = editor.tool.closesShape
         if list.count >= (closed ? 3 : 2) { editor.commitPolyline(list, closed: closed, on: page) }
     }
 
@@ -231,6 +231,8 @@ final class EditorPDFView: PDFView {
                 if large { DispatchQueue.main.async { editor.requestLink(in: rect, on: page) } }
             case .snapshot:
                 if large { editor.snapshot(rect, on: page) }
+            case .measureDistance:
+                if large { editor.commitDistance(from: start, to: point, on: page) }
             case .formText, .formCheckbox, .formRadio, .formChoice:
                 if let kind = editor.tool.formKind { editor.addFormField(kind, in: large ? rect : CGRect(origin: point, size: .zero), on: page) }
             default:
@@ -269,6 +271,8 @@ final class EditorPDFView: PDFView {
             a.border = border
             a.interiorColor = NSColor.controlAccentColor.withAlphaComponent(0.08)
             return a
+        case .measureDistance:
+            return Annotations.shape(.line, from: start, to: point, color: editor.strokeColor(for: tool), lineWidth: style.width)
         default:
             guard let shape = tool.shape else { return nil }
             let a = Annotations.shape(shape, from: start, to: point, color: editor.strokeColor(for: tool), lineWidth: style.width)

@@ -19,6 +19,7 @@ struct MarkupPalette: View {
             signButton
             stampButton
             group([.image, .link])
+            measureButton
             divider
             group([.redact, .eraser])
             divider
@@ -160,6 +161,29 @@ struct MarkupPalette: View {
         .help(Tool.stamp.help)
     }
 
+    private var measureButton: some View {
+        let active = Tool.measures.contains(editor.tool)
+        let shown = active ? editor.tool : editor.lastMeasure
+        return Menu {
+            ForEach(Tool.measures) { tool in
+                Button { editor.tool = tool } label: { Label(tool.label, systemImage: tool.symbol) }
+            }
+            Divider()
+            Button("Scale: \(editor.measureScale.ratio == 1 ? "1:1" : "1:\(editor.measureScale.ratio.formatted())") in \(editor.measureScale.unit.rawValue)…") {
+                editor.showMeasureScale = true
+            }
+        } label: {
+            PaletteLabel(symbol: shown.symbol, label: "Measure", selected: active, showsChevron: true)
+        } primaryAction: {
+            editor.tool = shown
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Measure distance, perimeter and area. Click points; double-click or Return to finish.")
+    }
+
     private var styleButton: some View {
         Button { showStyle.toggle() } label: {
             VStack(spacing: 3) {
@@ -220,7 +244,7 @@ struct PaletteLabel: View {
                 }
             }
             HStack(spacing: 1) {
-                Text(label).font(.system(size: 10)).lineLimit(1)
+                Text(label).font(.system(size: 10)).lineLimit(1).minimumScaleFactor(0.7)
                 if showsChevron { Image(systemName: "chevron.down").font(.system(size: 6, weight: .bold)) }
             }
             .foregroundStyle(selected ? Color.accentColor : .secondary)

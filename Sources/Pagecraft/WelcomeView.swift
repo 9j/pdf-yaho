@@ -46,6 +46,8 @@ struct WelcomeView: View {
                     ActionRow(symbol: "doc.badge.plus", title: "New Blank PDF", shortcut: "⌘N") { run { NSDocumentController.shared.newDocument(nil) } }
                     ActionRow(symbol: "photo.on.rectangle", title: "PDF from Images…", shortcut: nil) { run { Exporter.newFromImages() } }
                     ActionRow(symbol: "square.stack.3d.down.right", title: "Merge PDFs…", shortcut: nil) { run { Exporter.mergeFiles() } }
+                    ActionRow(symbol: "doc.text", title: "Convert File to PDF…", shortcut: nil) { run { Exporter.convertFiles() } }
+                    ActionRow(symbol: "rectangle.split.2x1", title: "Compare PDFs…", shortcut: nil) { run { CompareWindow.chooseFiles() } }
                 }
                 .padding(.top, 30)
                 Spacer()

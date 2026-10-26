@@ -124,6 +124,7 @@ private struct MoreSheets: ViewModifier {
             .sheet(isPresented: $editor.showSplit) { SplitSheet(editor: editor) }
             .sheet(isPresented: $editor.showLinkSheet) { LinkSheet(editor: editor) }
             .sheet(isPresented: $editor.showFindRedact) { FindRedactSheet(editor: editor) }
+            .sheet(isPresented: $editor.showMeasureScale) { MeasureScaleSheet(editor: editor) }
             .sheet(item: $editor.headerFooterPreset) { preset in HeaderFooterSheet(editor: editor, preset: preset) }
             .sheet(isPresented: $editor.needsPassword) { UnlockView(editor: editor) }
     }

@@ -205,3 +205,42 @@ struct FindRedactSheet: View {
         .frame(width: 460)
     }
 }
+
+struct MeasureScaleSheet: View {
+    @ObservedObject var editor: EditorController
+    @Environment(\.dismiss) private var dismiss
+    @State private var unit: Measure.Unit = .mm
+    @State private var ratio: Double = 1
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            SheetHeader(symbol: "ruler", title: "Measurement Scale",
+                        subtitle: "For drawings and plans. At 1:100, one millimetre on the page measures as 100 millimetres.")
+            Form {
+                Picker("Units", selection: $unit) {
+                    ForEach(Measure.Unit.allCases) { Text($0.rawValue).tag($0) }
+                }
+                HStack {
+                    Text("Scale 1 :")
+                    TextField("Ratio", value: $ratio, format: .number).frame(width: 90)
+                }
+                LabeledContent("1 inch on the page", value: Measure.Scale(unit: unit, ratio: ratio).format(length: 72))
+            }
+            .formStyle(.grouped)
+            .scrollDisabled(true)
+            .frame(height: 150)
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Set Scale") {
+                    editor.measureScale = Measure.Scale(unit: unit, ratio: max(ratio, 0.0001))
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(22)
+        .frame(width: 400)
+        .onAppear { unit = editor.measureScale.unit; ratio = editor.measureScale.ratio }
+    }
+}

@@ -64,6 +64,8 @@ struct PagecraftCommands: Commands {
         CommandGroup(after: .newItem) {
             Button("New PDF from Images…") { Exporter.newFromImages() }
             Button("Merge PDFs…") { Exporter.mergeFiles() }
+            Button("Convert File to PDF…") { Exporter.convertFiles() }
+            Button("Compare PDFs…") { CompareWindow.chooseFiles() }
             Divider()
             Button("Welcome to Pagecraft") { WelcomeWindowController.shared.show() }
                 .keyboardShortcut("1", modifiers: [.command, .shift])
@@ -134,6 +136,9 @@ struct PagecraftCommands: Commands {
             Menu("Theme") {
                 ForEach(ReadingTheme.allCases) { theme in Button(theme.rawValue) { editor?.theme = theme } }
             }
+            Button("Compare With Document…") { editor.map(CompareWindow.compare) }
+                .keyboardShortcut("c", modifiers: [.command, .option])
+                .disabled(editor == nil)
             Divider()
         }
         CommandMenu("Go") {
@@ -141,6 +146,9 @@ struct PagecraftCommands: Commands {
                 .keyboardShortcut(.upArrow, modifiers: [.command, .option])
             Button("Next Page") { editor.map { $0.goToPage($0.currentPageIndex + 1) } }
                 .keyboardShortcut(.downArrow, modifiers: [.command, .option])
+            Button("Back") { editor?.pdfView?.goBack(nil) }.keyboardShortcut("[")
+            Button("Forward") { editor?.pdfView?.goForward(nil) }.keyboardShortcut("]")
+            Divider()
             Button("First Page") { editor?.goToPage(0) }.keyboardShortcut(.upArrow)
             Button("Last Page") { editor.map { $0.goToPage($0.pageCount - 1) } }.keyboardShortcut(.downArrow)
             Divider()
@@ -159,6 +167,9 @@ struct PagecraftCommands: Commands {
             Button("Apply Redactions…") { editor?.applyRedactions() }
             Divider()
             Button("Clear Form") { editor?.resetForm() }
+            Divider()
+            Button("Measurement Scale…") { editor?.showMeasureScale = true }
+            Button("Snapshot Area") { editor?.tool = .snapshot }
             Divider()
             Button("Remove All Annotations") { editor?.removeAllAnnotations() }
         }

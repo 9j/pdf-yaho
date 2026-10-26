@@ -20,6 +20,7 @@ enum Tool: String, CaseIterable, Identifiable {
     case rectangle, oval, line, arrow, doubleArrow, polygon, polyline
     case signature, checkmark, cross, date, stamp, image, link
     case formText, formCheckbox, formRadio, formChoice
+    case measureDistance, measurePerimeter, measureArea
     case redact, eraser, crop, snapshot
 
     var id: String { rawValue }
@@ -48,6 +49,9 @@ enum Tool: String, CaseIterable, Identifiable {
         case .stamp: "Stamp"
         case .image: "Image"
         case .link: "Link"
+        case .measureDistance: "Distance"
+        case .measurePerimeter: "Perimeter"
+        case .measureArea: "Area"
         case .formText: "Text Field"
         case .formCheckbox: "Checkbox"
         case .formRadio: "Radio Button"
@@ -93,6 +97,9 @@ enum Tool: String, CaseIterable, Identifiable {
         case .stamp: "seal"
         case .image: "photo"
         case .link: "link"
+        case .measureDistance: "ruler"
+        case .measurePerimeter: "point.3.connected.trianglepath.dotted"
+        case .measureArea: "square.dashed"
         case .formText: "character.cursor.ibeam"
         case .formCheckbox: "checkmark.square"
         case .formRadio: "largecircle.fill.circle"
@@ -156,14 +163,16 @@ enum Tool: String, CaseIterable, Identifiable {
     static let pens: [Tool] = [.pen, .marker]
     static let fillAndSign: [Tool] = [.signature, .checkmark, .cross, .date, .formText, .formCheckbox, .formRadio, .formChoice]
     static let formFields: [Tool] = [.formText, .formCheckbox, .formRadio, .formChoice]
+    static let measures: [Tool] = [.measureDistance, .measurePerimeter, .measureArea]
 
     var isShapeTool: Bool { Tool.shapes.contains(self) }
-    var isPointTool: Bool { self == .polygon || self == .polyline }
+    var isPointTool: Bool { [.polygon, .polyline, .measurePerimeter, .measureArea].contains(self) }
+    var closesShape: Bool { self == .polygon || self == .measureArea }
     /// Tools that drag out a rectangle or stroke.
-    var drags: Bool { self == .pen || self == .marker || shape != nil || formKind != nil || [.redact, .crop, .snapshot, .link, .image].contains(self) }
+    var drags: Bool { self == .pen || self == .marker || shape != nil || formKind != nil || [.redact, .crop, .snapshot, .link, .image, .measureDistance].contains(self) }
     /// Tools whose look the user can tune with the style controls.
-    var isStyled: Bool { [.highlight, .underline, .strikeout, .pen, .marker, .text, .note, .checkmark, .cross, .date].contains(self) || isShapeTool }
-    var usesWidth: Bool { [.pen, .marker, .text, .date].contains(self) || isShapeTool }
+    var isStyled: Bool { [.highlight, .underline, .strikeout, .pen, .marker, .text, .note, .checkmark, .cross, .date].contains(self) || isShapeTool || Tool.measures.contains(self) }
+    var usesWidth: Bool { [.pen, .marker, .text, .date].contains(self) || isShapeTool || Tool.measures.contains(self) }
     var usesFill: Bool { self == .rectangle || self == .oval || self == .polygon }
     var usesDash: Bool { isShapeTool }
     /// Tools that are part of document editing rather than annotation.
@@ -268,6 +277,7 @@ final class EditorController: ObservableObject {
             .date: ToolStyle(color: Palette.swatches[0], width: 12),
         ]
         for shape in Tool.shapes { styles[shape] = ToolStyle(color: Palette.swatches[2], width: 2) }
+        for measure in Tool.measures { styles[measure] = ToolStyle(color: Palette.swatches[7], width: 1.5) }
         return styles
     }()
     @Published var stampChoice: StampChoice = .preset(StampPreset.all[0])
@@ -283,6 +293,9 @@ final class EditorController: ObservableObject {
     @Published private(set) var lastShape: Tool = .rectangle
     @Published private(set) var lastPen: Tool = .pen
     @Published private(set) var lastFillAndSign: Tool = .signature
+    @Published private(set) var lastMeasure: Tool = .measureDistance
+    @Published var measureScale = Measure.Scale()
+    @Published var showMeasureScale = false
     @Published var selected: SelectedAnnotation? { didSet { overlayTick += 1 } }
     @Published var textSelectionActive = false
     /// Bumped whenever on-screen geometry changes so overlays re-measure.
@@ -497,6 +510,7 @@ final class EditorController: ObservableObject {
         if tool.isShapeTool { lastShape = tool }
         if Tool.pens.contains(tool) { lastPen = tool }
         if Tool.fillAndSign.contains(tool) { lastFillAndSign = tool }
+        if Tool.measures.contains(tool) { lastMeasure = tool }
         if !tool.isUtility, mode != .markup { mode = .markup }
         if tool != .select { select(nil) }
         if let type = tool.markupType, let selection = pdfView?.currentSelection, !(selection.string ?? "").isEmpty {
@@ -850,10 +864,36 @@ final class EditorController: ObservableObject {
     }
 
     func commitPolyline(_ points: [CGPoint], closed: Bool, on page: PDFPage) {
-        let style = style(for: closed ? .polygon : .polyline)
-        guard let a = Annotations.polyline(points, closed: closed, color: strokeColor(for: closed ? .polygon : .polyline), lineWidth: style.width) else { return }
+        let style = style(for: tool)
+        guard let a = Annotations.polyline(points, closed: closed, color: strokeColor(for: tool), lineWidth: style.width) else { return }
         Annotations.setLineStyle(style.dash, of: a)
+        if tool == .polygon, let fill = style.fill { a.interiorColor = fill }
         add(a, to: page)
+        switch tool {
+        case .measurePerimeter:
+            addMeasureLabel(measureScale.format(length: Measure.perimeter(points, closed: false)), at: points[points.count / 2], on: page)
+        case .measureArea:
+            let center = CGPoint(x: points.map(\.x).reduce(0, +) / CGFloat(points.count), y: points.map(\.y).reduce(0, +) / CGFloat(points.count))
+            addMeasureLabel(measureScale.format(area: Measure.area(points)), at: center, on: page)
+        default: break
+        }
+        undoManager?.setActionName(Tool.measures.contains(tool) ? "Measure" : tool.label)
+    }
+
+    func commitDistance(from start: CGPoint, to end: CGPoint, on page: PDFPage) {
+        let style = style(for: .measureDistance)
+        let line = Annotations.shape(.doubleArrow, from: start, to: end, color: strokeColor(for: .measureDistance), lineWidth: style.width)
+        add(line, to: page)
+        addMeasureLabel(measureScale.format(length: Measure.distance(start, end)),
+                        at: CGPoint(x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 + 9), on: page)
+        undoManager?.setActionName("Measure")
+    }
+
+    private func addMeasureLabel(_ text: String, at point: CGPoint, on page: PDFPage) {
+        let label = Annotations.freeText(text, at: .zero, color: style(for: tool).color, fontSize: 10)
+        label.color = NSColor.white.withAlphaComponent(0.85)
+        label.bounds.origin = CGPoint(x: point.x - label.bounds.width / 2, y: point.y - label.bounds.height / 2)
+        add(label, to: page)
     }
 
     func requestLink(in rect: CGRect, on page: PDFPage) {

@@ -146,6 +146,21 @@ enum Exporter {
         saveAndOpen(PDFOps.document(fromImages: images), name: "Images.pdf", title: "Save PDF")
     }
 
+    /// Converts Word, RTF, HTML, Markdown, text or image files into PDFs, merging several into one.
+    static func convertFiles() {
+        let urls = Prompt.open(Convert.supportedTypes, multiple: true, title: "Choose Files to Convert to PDF")
+        guard !urls.isEmpty else { return }
+        var docs: [PDFDocument] = []
+        var failed: [String] = []
+        for url in urls {
+            if let doc = try? Convert.document(from: url), doc.pageCount > 0 { docs.append(doc) } else { failed.append(url.lastPathComponent) }
+        }
+        if !failed.isEmpty { Prompt.error("Couldn’t convert: \(failed.joined(separator: ", "))") }
+        guard !docs.isEmpty else { return }
+        let name = urls.count == 1 ? urls[0].deletingPathExtension().lastPathComponent + ".pdf" : "Converted.pdf"
+        saveAndOpen(docs.count == 1 ? docs[0] : PDFOps.merge(docs), name: name, title: "Save PDF")
+    }
+
     static func saveAndOpen(_ doc: PDFDocument, name: String, title: String) {
         guard doc.pageCount > 0, let url = Prompt.save(.pdf, name: name, title: title) else { return }
         guard PDFOps.write(doc, to: url) else { Prompt.error("Could not write \(url.lastPathComponent)."); return }
