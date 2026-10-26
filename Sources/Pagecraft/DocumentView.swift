@@ -93,6 +93,12 @@ struct DocumentView: View {
         .onAppear {
             editor.undoManager = undoManager
             WelcomeWindowController.shared.close()
+            // The window is attached a moment after the view appears.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                guard let window = editor.pdfView?.window else { return }
+                EditorRegistry.register(editor, window: window)
+                if let url = editor.fileURL, let action = DocumentLauncher.take(for: url) { editor.perform(action) }
+            }
         }
         .onChange(of: undoManager) { _, manager in editor.undoManager = manager }
         .modifier(DocumentSheets(editor: editor))
