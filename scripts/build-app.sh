@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds Pagecraft.app into ./build. Usage: scripts/build-app.sh [debug|release]
+# Builds "PDF Yaho.app" into ./build. Usage: scripts/build-app.sh [debug|release]
 # Set ARCHS="arm64" for a faster single-architecture build.
 set -eu
 cd "$(dirname "$0")/.."
@@ -13,19 +13,19 @@ for arch in ${ARCHS:-arm64 x86_64}; do arch_flags="$arch_flags --arch $arch"; do
 # shellcheck disable=SC2086
 swift build -c "$config" $arch_flags
 # shellcheck disable=SC2086
-bin="$(swift build -c "$config" $arch_flags --show-bin-path)/Pagecraft"
+bin="$(swift build -c "$config" $arch_flags --show-bin-path)/PDFYaho"
 
-app="build/Pagecraft.app"
+app="build/PDF Yaho.app"
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
-cp "$bin" "$app/Contents/MacOS/Pagecraft"
+cp "$bin" "$app/Contents/MacOS/PDFYaho"
 [ -f Resources/AppIcon.icns ] && cp Resources/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
-if otool -L "$app/Contents/MacOS/Pagecraft" | grep -q libpdfium; then
+if otool -L "$app/Contents/MacOS/PDFYaho" | grep -q libpdfium; then
     mkdir -p "$app/Contents/Frameworks" "$app/Contents/Resources/Licenses/PDFium"
     cp Vendor/pdfium/lib/libpdfium.dylib "$app/Contents/Frameworks/"
     cp Vendor/pdfium/LICENSE Vendor/pdfium/licenses/* "$app/Contents/Resources/Licenses/PDFium/"
     # Drop the development rpath into Vendor/ so the app only loads its own copy.
-    install_name_tool -delete_rpath "$(pwd)/Vendor/pdfium/lib" "$app/Contents/MacOS/Pagecraft" 2>/dev/null || true
+    install_name_tool -delete_rpath "$(pwd)/Vendor/pdfium/lib" "$app/Contents/MacOS/PDFYaho" 2>/dev/null || true
 fi
 
 cat > "$app/Contents/Info.plist" <<PLIST
@@ -33,12 +33,12 @@ cat > "$app/Contents/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleExecutable</key><string>Pagecraft</string>
+    <key>CFBundleExecutable</key><string>PDFYaho</string>
     <key>CFBundleDevelopmentRegion</key><string>en</string>
     <key>CFBundleLocalizations</key><array><string>en</string></array>
-    <key>CFBundleIdentifier</key><string>org.pagecraft.Pagecraft</string>
-    <key>CFBundleName</key><string>Pagecraft</string>
-    <key>CFBundleDisplayName</key><string>Pagecraft</string>
+    <key>CFBundleIdentifier</key><string>org.pdfyaho.PDFYaho</string>
+    <key>CFBundleName</key><string>PDF Yaho</string>
+    <key>CFBundleDisplayName</key><string>PDF Yaho</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>$version</string>
     <key>CFBundleVersion</key><string>1</string>
@@ -54,7 +54,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
             <key>CFBundleTypeRole</key><string>Editor</string>
             <key>LSHandlerRank</key><string>Alternate</string>
             <key>LSItemContentTypes</key><array><string>com.adobe.pdf</string></array>
-            <key>NSUbiquitousDocumentUserActivityType</key><string>org.pagecraft.editing</string>
+            <key>NSUbiquitousDocumentUserActivityType</key><string>org.pdfyaho.editing</string>
         </dict>
     </array>
 </dict>

@@ -1,6 +1,6 @@
 # Feature parity with PDF Expert
 
-Pagecraft is a clean-room reimplementation. It contains no code, artwork, strings or
+PDF Yaho is a clean-room reimplementation. It contains no code, artwork, strings or
 resources from PDF Expert. The reference app was examined to build a list of features,
 then each feature was written from scratch on Apple's PDFKit.
 
@@ -28,14 +28,14 @@ arm64/x86_64 Mach-O, SHA-256 `d48539f11c99da7ed5ac8dffac27628b8344c98a56e0153ed7
   describe the Home tab's pages (Home, Recents, Favorites, Tools) and behaviour.
 
 No runtime tracing or decompilation was needed. The menu titles and plist answer what the
-app offers. How Pagecraft implements each feature was decided independently.
+app offers. How PDF Yaho implements each feature was decided independently.
 
 ## Status
 
 The second pass went through all 1,700 English UI strings in the bundle's
 `Localizable.strings`, not only the menu titles. That found tools that are not in the menus.
 
-| Area | PDF Expert feature | Pagecraft |
+| Area | PDF Expert feature | PDF Yaho |
 | --- | --- | --- |
 | Reading | Single, Two Pages, Two Pages with cover, continuous | ✅ |
 | Reading | Day, Night, Sepia themes | ✅ |

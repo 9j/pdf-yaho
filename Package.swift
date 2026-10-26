@@ -7,16 +7,16 @@ let vendor = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendi
 let hasPDFium = FileManager.default.fileExists(atPath: vendor + "/libpdfium.dylib")
 
 let package = Package(
-    name: "Pagecraft",
+    name: "PDFYaho",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "Pagecraft", targets: ["Pagecraft"]),
-        .library(name: "PagecraftCore", targets: ["PagecraftCore"]),
+        .executable(name: "PDFYaho", targets: ["PDFYaho"]),
+        .library(name: "PDFYahoCore", targets: ["PDFYahoCore"]),
     ],
     targets: [
         .systemLibrary(name: "CPDFium"),
         .target(
-            name: "PagecraftCore",
+            name: "PDFYahoCore",
             dependencies: hasPDFium ? ["CPDFium"] : [],
             swiftSettings: hasPDFium ? [.define("PDFIUM")] : [],
             linkerSettings: hasPDFium ? [.unsafeFlags([
@@ -25,9 +25,9 @@ let package = Package(
                 "-Xlinker", "-rpath", "-Xlinker", vendor,
             ])] : []
         ),
-        .executableTarget(name: "Pagecraft", dependencies: ["PagecraftCore"],
+        .executableTarget(name: "PDFYaho", dependencies: ["PDFYahoCore"],
                           swiftSettings: hasPDFium ? [.define("PDFIUM")] : []),
-        .testTarget(name: "PagecraftCoreTests", dependencies: ["PagecraftCore"],
+        .testTarget(name: "PDFYahoCoreTests", dependencies: ["PDFYahoCore"],
                     swiftSettings: hasPDFium ? [.define("PDFIUM")] : []),
     ]
 )

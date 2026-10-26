@@ -1,9 +1,9 @@
-# Pagecraft
+# PDF Yaho
 
 A free, open-source PDF reader and editor for macOS, built on Apple PDFKit.
 No account, no subscription, no telemetry.
 
-Pagecraft covers the everyday features of commercial PDF editors such as PDF Expert:
+PDF Yaho covers the everyday features of commercial PDF editors such as PDF Expert:
 reading, annotating, signing, redacting, filling forms and rearranging pages.
 [docs/feature-parity.md](docs/feature-parity.md) lists what is done and what is planned.
 
@@ -78,10 +78,10 @@ macOS 14 or later. Building needs Xcode 16 or the Swift 6 toolchain.
 
 ```sh
 scripts/fetch-pdfium.sh         # once: pinned PDFium for Edit mode (build-app.sh runs it too)
-scripts/build-app.sh            # universal release build → build/Pagecraft.app
+scripts/build-app.sh            # universal release build → build/PDF Yaho.app
 ARCHS=arm64 scripts/build-app.sh debug
-open build/Pagecraft.app
-swift test                      # unit tests for PagecraftCore
+open "build/PDF Yaho.app"
+swift test                      # unit tests for PDFYahoCore
 ```
 
 Editing page content uses [PDFium](https://pdfium.googlesource.com/pdfium/) (BSD-3/Apache-2.0),
@@ -97,9 +97,9 @@ right-click it and choose **Open**.
 
 | Path | Contents |
 | --- | --- |
-| `Sources/PagecraftCore` | UI-free document operations: page edits, annotation factories, export, signatures. Unit tested. |
-| `Sources/Pagecraft` | SwiftUI app: document window, PDF view and tools, sidebar, menus. |
-| `Tests/PagecraftCoreTests` | XCTest suite for the core. |
+| `Sources/PDFYahoCore` | UI-free document operations: page edits, annotation factories, export, signatures. Unit tested. |
+| `Sources/PDFYaho` | SwiftUI app: document window, PDF view and tools, sidebar, menus. |
+| `Tests/PDFYahoCoreTests` | XCTest suite for the core. |
 | `Sources/CPDFium` | Module map for the vendored PDFium headers. |
 | `scripts/build-app.sh` | Builds the `.app` bundle. |
 | `scripts/fetch-pdfium.sh` | Downloads and checks the pinned PDFium into `Vendor/pdfium`. |
@@ -107,7 +107,7 @@ right-click it and choose **Open**.
 
 ## Clean-room note
 
-Pagecraft is not affiliated with Readdle or PDF Expert. The reference app was examined
+PDF Yaho is not affiliated with Readdle or PDF Expert. The reference app was examined
 only to list its features (see [docs/feature-parity.md](docs/feature-parity.md)). No
 code, assets or text from it are included.
 
