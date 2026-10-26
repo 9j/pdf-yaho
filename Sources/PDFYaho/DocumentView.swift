@@ -103,6 +103,7 @@ struct DocumentView: View {
                 if let sheet = ProcessInfo.processInfo.environment["PDFYAHO_QA_SHEET"] { editor.openSheetQA(sheet) }
                 if let steps = ProcessInfo.processInfo.environment["PDFYAHO_QA_STEPS"] { editor.runStepsQA(steps) }
                 if let shot = ProcessInfo.processInfo.environment["PDFYAHO_QA_SHOT"] { editor.stageShotQA(shot) }
+                if let delay = ProcessInfo.processInfo.environment["PDFYAHO_QA_DEMORUN"].flatMap(Double.init) { editor.runDemoQA(after: delay) }
                 #endif
             }
         }

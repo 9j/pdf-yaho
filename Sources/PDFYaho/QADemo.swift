@@ -222,5 +222,141 @@ extension EditorController {
         }
     }
 }
-#endif
 
+extension EditorController {
+    /// Plays a scripted session (edit, highlight, sign, pages) on the demo workshop PDF for a screen recording,
+    /// logging each step with its time and window position (points, top-left origin) to /tmp/yaho-video/events.json.
+    func runDemoQA(after delay: Double) {
+        var events: [[String: Any]] = []
+        func windowPoint(_ point: CGPoint, on page: PDFPage) -> CGPoint? {
+            guard let view = pdfView, let window = view.window else { return nil }
+            let p = view.convert(view.convert(point, from: page), to: nil)
+            return CGPoint(x: p.x, y: window.frame.height - p.y)
+        }
+        func log(_ name: String, _ point: CGPoint? = nil) {
+            var event: [String: Any] = ["t": Date().timeIntervalSince1970, "name": name]
+            if let point, point.x.isFinite, point.y.isFinite { event["x"] = point.x; event["y"] = point.y }
+            events.append(event)
+            if let data = try? JSONSerialization.data(withJSONObject: events, options: [.prettyPrinted]) {
+                try? data.write(to: URL(fileURLWithPath: "/tmp/yaho-video/events.json"))
+            }
+        }
+        func at(_ t: Double, _ body: @escaping () -> Void) { DispatchQueue.main.asyncAfter(deadline: .now() + delay + t, execute: body) }
+
+        pdfView?.window?.setFrame(CGRect(x: 80, y: 60, width: 1440, height: 900), display: true)
+        if let signature = SavedSignature.typed("Yaho Kim", font: NSFont(name: "Snell Roundhand", size: 64) ?? .systemFont(ofSize: 64)) {
+            signatureLibrary = [signature]
+            activeSignatureID = signature.id
+        }
+        guard let first = document.page(at: 0) else { return }
+        at(-1.5) { [self] in
+            zoom(to: 1.15)
+            pdfView?.go(to: PDFDestination(page: first, at: CGPoint(x: 0, y: first.bounds(for: .cropBox).maxY)))
+        }
+        at(0) { log("start") }
+
+        // 1. Edit a paragraph in place.
+        at(1.6) { [self] in log("click-edit-tab"); mode = .edit }
+        let typed = " 저녁에는 산장 마당에서 바비큐도 준비합니다."
+        at(3.0) { [self] in
+            loadContent(on: first, force: true)
+            guard let block = contentBlocks.first(where: { $0.text.hasPrefix("한 해의") }) else { return }
+            log("click-paragraph", windowPoint(CGPoint(x: block.bounds.maxX - 40, y: block.bounds.minY + 6), on: first))
+            selectedContent = block
+            pdfView?.beginContentEditing(block, on: first)
+        }
+        for (i, char) in typed.enumerated() {
+            at(3.6 + Double(i) * 0.09) { [self] in
+                if i == 0 { log("type-start") }
+                (pdfView?.window?.firstResponder as? NSTextView)?.insertText(String(char), replacementRange: NSRange(location: NSNotFound, length: 0))
+            }
+        }
+        let typedEnd = 3.6 + Double(typed.count) * 0.09
+        at(typedEnd + 0.6) { [self] in
+            log("click-away", windowPoint(CGPoint(x: 120, y: 120), on: first))
+            pdfView?.commitInline()
+            selectedContent = nil
+        }
+
+        // 2. Highlight and comment.
+        let annotateAt = typedEnd + 2.0
+        at(annotateAt) { [self] in log("click-annotate-tab"); mode = .annotate; tool = .highlight }
+        for (k, phrase) in ["4월 4일까지", "등산화와 물은 꼭"].enumerated() {
+            let t = annotateAt + 1.2 + Double(k) * 1.6
+            at(t) { [self] in
+                guard let match = document.findString(phrase, withOptions: []).first else { return }
+                guard let page = match.pages.first else { return }
+                let b = match.bounds(for: page)
+                log("drag-start", windowPoint(CGPoint(x: b.minX, y: b.midY), on: page))
+            }
+            at(t + 0.7) { [self] in
+                guard let match = document.findString(phrase, withOptions: []).first else { return }
+                guard let page = match.pages.first else { return }
+                let b = match.bounds(for: page)
+                log("drag-end", windowPoint(CGPoint(x: b.maxX, y: b.midY), on: page))
+                applyMarkup(.highlight, to: match)
+            }
+        }
+        at(annotateAt + 4.8) { [self] in
+            log("click-callout", windowPoint(CGPoint(x: 330, y: 215), on: first))
+            add(CalloutAnnotation.make(text: "비 오면 실내 일정으로?", box: CGRect(x: 360, y: 250, width: 170, height: 30),
+                                       anchor: CGPoint(x: 330, y: 215), color: Palette.swatches[2], fontSize: 12), to: first)
+        }
+
+        // 3. Fill in the form and sign.
+        let signAt = annotateAt + 7.0
+        at(signAt) { [self] in log("click-sign-tab"); mode = .fillSign; tool = .text; goToPage(3) }
+        let fields = [("이름", "김야호"), ("소속 팀", "디자인팀"), ("코스 선택", "백운대")]
+        for (k, field) in fields.enumerated() {
+            at(signAt + 1.2 + Double(k) * 0.9) { [self] in
+                guard let last = document.page(at: 3),
+                      let r = document.findString(field.0, withOptions: []).first(where: { $0.pages.first === last })?.bounds(for: last)
+                else { return }
+                let point = CGPoint(x: r.minX + 4, y: r.minY - 3)
+                log("click-field", windowPoint(CGPoint(x: point.x + 20, y: point.y - 8), on: last))
+                commitNewText(field.1, at: point, on: last)
+                select(nil)
+            }
+        }
+        at(signAt + 4.4) { [self] in
+            guard let last = document.page(at: 3),
+                  let r = document.findString("서명", withOptions: []).first(where: { $0.pages.first === last })?.bounds(for: last)
+            else { return }
+            let point = CGPoint(x: r.minX + 95, y: r.minY - 14)
+            log("click-signature", windowPoint(point, on: last))
+            tool = .signature
+            placeSignature(at: point, on: last)
+            select(nil)
+        }
+
+        // 4. Organize pages.
+        let pagesAt = signAt + 6.4
+        at(pagesAt) { [self] in log("click-pages-tab"); mode = .pages; selectedPages = [] }
+        at(pagesAt + 1.2) { [self] in log("click-page-2"); selectedPages = [1] }
+        at(pagesAt + 1.9) { [self] in log("cmd-click-page-3"); selectedPages = [1, 2] }
+        at(pagesAt + 2.8) { [self] in log("click-rotate"); rotate(90) }
+        at(pagesAt + 4.2) { log("end") }
+    }
+}
+
+@MainActor
+enum WindowQA {
+    /// PDFYAHO_QA_HOMECLOSE: closes Home 2 s after launch and logs which windows are visible afterwards.
+    static func run() {
+        guard ProcessInfo.processInfo.environment["PDFYAHO_QA_HOMECLOSE"] != nil else { return }
+        let url = URL(fileURLWithPath: "/tmp/pdfyaho-qa.log")
+        func log(_ line: String) {
+            let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+            try? (text + line + "\n").write(to: url, atomically: true, encoding: .utf8)
+        }
+        func visible() -> String { NSApp.windows.filter(\.isVisible).map { $0.title.isEmpty ? String(describing: type(of: $0)) : $0.title }.joined(separator: " | ") }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            log("before close: \(visible())")
+            NSApp.windows.first { $0.title == "Home" && $0.isVisible }?.performClose(nil)
+        }
+        for t in [3.0, 5.0, 8.0] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + t) { log("t=\(t): \(visible())") }
+        }
+    }
+}
+#endif
