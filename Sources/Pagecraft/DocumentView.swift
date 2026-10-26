@@ -100,6 +100,9 @@ struct DocumentView: View {
         .sheet(isPresented: $editor.showPasswordSheet) { PasswordSheet(editor: editor) }
         .sheet(isPresented: $editor.showReduceSize) { ReduceSizeSheet(editor: editor) }
         .sheet(isPresented: $editor.showExportImages) { ExportImagesSheet(editor: editor) }
+        .sheet(isPresented: $editor.showPageSize) { PageSizeSheet(editor: editor) }
+        .sheet(isPresented: $editor.showSplit) { SplitSheet(editor: editor) }
+        .sheet(item: $editor.headerFooterPreset) { preset in HeaderFooterSheet(editor: editor, preset: preset) }
         .overlay {
             if let message = editor.busy {
                 ZStack {

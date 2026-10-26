@@ -16,7 +16,7 @@ enum EditorMode: String, CaseIterable, Identifiable {
 }
 
 enum Tool: String, CaseIterable, Identifiable {
-    case select, highlight, underline, strikeout, pen, text, note, rectangle, oval, line, arrow, signature, redact, eraser
+    case select, highlight, underline, strikeout, pen, text, note, rectangle, oval, line, arrow, signature, redact, eraser, crop
 
     var id: String { rawValue }
 
@@ -36,6 +36,7 @@ enum Tool: String, CaseIterable, Identifiable {
         case .signature: "Sign"
         case .redact: "Redact"
         case .eraser: "Eraser"
+        case .crop: "Crop"
         }
     }
 
@@ -55,6 +56,7 @@ enum Tool: String, CaseIterable, Identifiable {
         case .signature: "signature"
         case .redact: "rectangle.inset.filled"
         case .eraser: "eraser"
+        case .crop: "crop"
         }
     }
 
@@ -75,6 +77,7 @@ enum Tool: String, CaseIterable, Identifiable {
         case .signature: "g"
         case .redact: "x"
         case .eraser: "e"
+        case .crop: "c"
         }
     }
 
@@ -102,7 +105,7 @@ enum Tool: String, CaseIterable, Identifiable {
     static let shapes: [Tool] = [.rectangle, .oval, .line, .arrow]
 
     /// Tools whose look the user can tune with the colour and width controls.
-    var isStyled: Bool { ![.select, .eraser, .redact, .signature].contains(self) }
+    var isStyled: Bool { ![.select, .eraser, .redact, .signature, .crop].contains(self) }
     var usesWidth: Bool { self == .pen || shape != nil || self == .text }
 }
 
@@ -214,13 +217,18 @@ final class EditorController: ObservableObject {
     @Published var showPasswordSheet = false
     @Published var showReduceSize = false
     @Published var showExportImages = false
+    @Published var showPageSize = false
+    @Published var showSplit = false
+    @Published var headerFooterPreset: HeaderFooterPreset?
+    /// Rectangle being drawn with the Crop tool, in page space.
+    @Published var cropDraft: (page: PDFPage, rect: CGRect)? { didSet { overlayTick += 1 } }
     /// Message for a blocking progress overlay, while a long operation runs.
     @Published var busy: String?
     @Published var needsPassword: Bool
     @Published var toast: Toast?
     @Published var focusPageField = false
 
-    private var thumbnailCache: [String: NSImage] = [:]
+    private var thumbnailCache: [ObjectIdentifier: [String: NSImage]] = [:]
     private var observers: [NSObjectProtocol] = []
 
     init(file: PDFFile) {
@@ -258,20 +266,17 @@ final class EditorController: ObservableObject {
         applyTheme()
         let center = NotificationCenter.default
         observers.forEach(center.removeObserver)
+        // PDFView posts these while AppKit is laying out. Publishing synchronously would invalidate
+        // SwiftUI in the middle of that pass and can loop, so state is updated on the next turn.
         observers = [
             center.addObserver(forName: .PDFViewPageChanged, object: view, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.syncCurrentPage() }
+                MainActor.assumeIsolated { self?.scheduleViewSync() }
             },
             center.addObserver(forName: .PDFViewScaleChanged, object: view, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    self?.scale = view.scaleFactor
-                    self?.overlayTick += 1
-                }
+                MainActor.assumeIsolated { self?.scheduleViewSync() }
             },
             center.addObserver(forName: .PDFViewSelectionChanged, object: view, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    if (view.currentSelection?.string ?? "").isEmpty { self?.textSelectionActive = false }
-                }
+                MainActor.assumeIsolated { self?.scheduleViewSync() }
             },
             center.addObserver(forName: .PDFViewAnnotationHit, object: view, queue: .main) { [weak self] note in
                 // Form widgets are edited by PDFKit directly; record that the document changed.
@@ -285,10 +290,30 @@ final class EditorController: ObservableObject {
             clip.postsBoundsChangedNotifications = true
             observers.append(center.addObserver(forName: NSView.boundsDidChangeNotification, object: clip, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated {
-                    self?.overlayTick += 1
                     self?.pdfView?.commitInline()
+                    self?.scheduleViewSync()
                 }
             })
+        }
+    }
+
+    private var viewSyncPending = false
+
+    /// Coalesces PDFView geometry and page changes into one SwiftUI update after the current layout pass.
+    private func scheduleViewSync() {
+        guard !viewSyncPending else { return }
+        viewSyncPending = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.viewSyncPending = false
+            guard let view = self.pdfView else { return }
+            if let page = view.currentPage {
+                let index = self.document.index(for: page)
+                if index != self.currentPageIndex { self.currentPageIndex = index }
+            }
+            if abs(view.scaleFactor - self.scale) > 0.001 { self.scale = view.scaleFactor }
+            if self.textSelectionActive, (view.currentSelection?.string ?? "").isEmpty { self.textSelectionActive = false }
+            if self.selected != nil || self.textSelectionActive || self.cropDraft != nil { self.overlayTick += 1 }
         }
     }
 
@@ -306,8 +331,7 @@ final class EditorController: ObservableObject {
         if pages.isEmpty {
             thumbnailCache.removeAll()
         } else {
-            let keys = Set(pages.map { "\(ObjectIdentifier($0).hashValue)" })
-            thumbnailCache = thumbnailCache.filter { !keys.contains(String($0.key.split(separator: "-")[0])) }
+            for page in pages { thumbnailCache[ObjectIdentifier(page)] = nil }
         }
         for page in pages { pdfView?.annotationsChanged(on: page) }
         revision += 1
@@ -324,10 +348,10 @@ final class EditorController: ObservableObject {
     func thumbnail(for index: Int, side: CGFloat = 240) -> NSImage? {
         guard let page = document.page(at: index) else { return nil }
         let bucket = side <= 240 ? 240 : side <= 480 ? 480 : 720
-        let key = "\(ObjectIdentifier(page).hashValue)-\(page.rotation)-\(bucket)"
-        if let cached = thumbnailCache[key] { return cached }
+        let key = "\(page.rotation)-\(bucket)"
+        if let cached = thumbnailCache[ObjectIdentifier(page)]?[key] { return cached }
         let image = page.thumbnail(of: CGSize(width: bucket, height: bucket), for: .cropBox)
-        thumbnailCache[key] = image
+        thumbnailCache[ObjectIdentifier(page), default: [:]][key] = image
         return image
     }
 
@@ -353,6 +377,11 @@ final class EditorController: ObservableObject {
         return selected.flatMap { viewRect($0.annotation.bounds, on: $0.page) }
     }
 
+    var cropFrame: CGRect? {
+        _ = overlayTick
+        return cropDraft.flatMap { viewRect($0.rect, on: $0.page) }
+    }
+
     var textSelectionFrame: CGRect? {
         _ = overlayTick
         guard textSelectionActive, let selection = pdfView?.currentSelection, let page = selection.pages.first else { return nil }
@@ -374,9 +403,10 @@ final class EditorController: ObservableObject {
     }
 
     private func toolChanged() {
-        if tool != .select { lastMarkupTool = tool }
+        if tool != .crop { cropDraft = nil }
+        if tool != .select, tool != .crop { lastMarkupTool = tool }
         if tool.shape != nil { lastShape = tool }
-        if tool != .select, mode != .markup { mode = .markup }
+        if tool != .select, tool != .crop, mode != .markup { mode = .markup }
         if tool != .select { select(nil) }
         if let type = tool.markupType, let selection = pdfView?.currentSelection, !(selection.string ?? "").isEmpty {
             applyMarkup(type, to: selection)
@@ -651,11 +681,132 @@ final class EditorController: ObservableObject {
         guard let other = PDFDocument(url: url) else { Prompt.error("Could not open \(url.lastPathComponent).") ; return }
         var pages = PDFOps.pages(of: document)
         let at = min((targetPageIndices.last ?? currentPageIndex) + 1, pages.count)
-        let inserted = PDFOps.copies(of: PDFOps.pages(of: other))
+        let inserted = PDFOps.adopt(other)
         pages.insert(contentsOf: inserted, at: at)
         setPages(pages, actionName: "Insert Pages")
         selectedPages = Set(at..<(at + inserted.count))
         showToast("Inserted \(inserted.count) \(inserted.count == 1 ? "page" : "pages")")
+    }
+
+    // MARK: Crop, resize and generated pages
+
+    func beginCrop() {
+        if mode == .pages { mode = .read }
+        tool = .crop
+    }
+
+    func applyCrop(toAll: Bool) {
+        guard let draft = cropDraft, draft.rect.width > 10, draft.rect.height > 10 else { return }
+        let pages = toAll ? PDFOps.pages(of: document) : selectedPages.count > 1 ? targetPageIndices.compactMap { document.page(at: $0) } : [draft.page]
+        setCropBoxes(pages.map { ($0, draft.rect.intersection($0.bounds(for: .mediaBox))) }, actionName: "Crop")
+        cropDraft = nil
+        tool = .select
+        showToast("Cropped \(pages.count) \(pages.count == 1 ? "page" : "pages")")
+    }
+
+    func autoCrop(_ indices: [Int]? = nil) {
+        let pages = (indices ?? targetPageIndices).compactMap { document.page(at: $0) }
+        let boxes = pages.compactMap { page -> (PDFPage, CGRect)? in
+            guard let content = PageOps.contentBounds(page) else { return nil }
+            return (page, content.insetBy(dx: -12, dy: -12).intersection(page.bounds(for: .mediaBox)))
+        }
+        guard !boxes.isEmpty else { showToast("Nothing to trim"); return }
+        setCropBoxes(boxes, actionName: "Clear Margins")
+        showToast("Trimmed margins on \(boxes.count) \(boxes.count == 1 ? "page" : "pages")")
+    }
+
+    func resetCrop(_ indices: [Int]? = nil) {
+        let pages = (indices ?? targetPageIndices).compactMap { document.page(at: $0) }
+        setCropBoxes(pages.map { ($0, $0.bounds(for: .mediaBox)) }, actionName: "Reset Crop")
+    }
+
+    private func setCropBoxes(_ boxes: [(PDFPage, CGRect)], actionName: String) {
+        let previous = boxes.map { ($0.0, $0.0.bounds(for: .cropBox)) }
+        for (page, rect) in boxes { page.setBounds(rect, for: .cropBox) }
+        registerUndo(actionName) { $0.setCropBoxes(previous, actionName: actionName) }
+        changed(boxes.map(\.0))
+        pdfView?.layoutDocumentView()
+    }
+
+    enum Orientation: String, CaseIterable, Identifiable {
+        case portrait = "Portrait", landscape = "Landscape", match = "Match Each Page"
+        var id: String { rawValue }
+    }
+
+    func resizePages(_ indices: [Int], to size: CGSize, orientation: Orientation, scaleToFit: Bool) {
+        let targets = Set(indices)
+        let pages = PDFOps.pages(of: document).enumerated().map { index, page -> PDFPage in
+            guard targets.contains(index) else { return page }
+            let shown = PageOps.displaySize(page)
+            let landscape = orientation == .landscape || (orientation == .match && shown.width > shown.height)
+            let target = landscape ? CGSize(width: max(size.width, size.height), height: min(size.width, size.height))
+                                   : CGSize(width: min(size.width, size.height), height: max(size.width, size.height))
+            return PageOps.redrawn(page, size: target, scaleToFit: scaleToFit) ?? page
+        }
+        setPages(pages, actionName: "Page Size")
+        showToast("Resized \(targets.count) \(targets.count == 1 ? "page" : "pages")")
+    }
+
+    private func insert(_ newPages: [PDFPage], actionName: String) {
+        guard !newPages.isEmpty else { return }
+        var pages = PDFOps.pages(of: document)
+        let at = min((targetPageIndices.last ?? currentPageIndex) + 1, pages.count)
+        pages.insert(contentsOf: newPages, at: at)
+        setPages(pages, actionName: actionName)
+        selectedPages = Set(at..<(at + newPages.count))
+        goToPage(at)
+        showToast("Inserted \(newPages.count) \(newPages.count == 1 ? "page" : "pages")")
+    }
+
+    func insertImages() {
+        let urls = Prompt.open([.image], multiple: true, title: "Insert Pages from Images")
+        let pages = urls.compactMap { NSImage(contentsOf: $0).flatMap(PDFPage.init(image:)) }
+        insert(pages, actionName: "Insert Images")
+    }
+
+    func insertFromClipboard() {
+        let pages = PageOps.pages(from: .general)
+        guard !pages.isEmpty else { showToast("The clipboard has no PDF or image"); return }
+        insert(pages, actionName: "Paste Pages")
+    }
+
+    func duplicatePages() {
+        let indices = targetPageIndices
+        var pages = PDFOps.pages(of: document)
+        let copies = PDFOps.copies(of: indices.compactMap { document.page(at: $0) })
+        let at = (indices.last ?? currentPageIndex) + 1
+        pages.insert(contentsOf: copies, at: min(at, pages.count))
+        setPages(pages, actionName: "Duplicate Pages")
+        selectedPages = Set(at..<(at + copies.count))
+    }
+
+    func reversePages() {
+        let indices = selectedPages.count > 1 ? selectedPages.sorted() : Array(0..<pageCount)
+        var pages = PDFOps.pages(of: document)
+        let reversed = indices.map { pages[$0] }.reversed()
+        for (slot, page) in zip(indices, reversed) { pages[slot] = page }
+        setPages(pages, actionName: "Reverse Pages")
+    }
+
+    func addStamp(_ stamp: PageOps.Stamp, pages indices: [Int]) {
+        let added = PageOps.addStamp(stamp, to: document, pages: indices, fileName: title)
+        registerUndo("Header & Footer") { editor in
+            for (page, a) in added { page.removeAnnotation(a) }
+            editor.changed()
+        }
+        changed()
+        showToast("Added to \(added.count) \(added.count == 1 ? "page" : "pages")")
+    }
+
+    func removeStamps() {
+        let removed = PageOps.removeStamps(from: document)
+        guard !removed.isEmpty else { showToast("No headers, footers or page numbers to remove"); return }
+        registerUndo("Remove Header & Footer") { editor in
+            for (page, a) in removed { page.addAnnotation(a) }
+            editor.changed()
+        }
+        changed()
+        showToast("Removed from \(Set(removed.map { ObjectIdentifier($0.page) }).count) pages")
     }
 
     func addPageNumbers() {
@@ -836,7 +987,7 @@ final class EditorController: ObservableObject {
             return
         }
         let found = PDFOps.pages(of: recognized).filter { !($0.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count
-        setPages(PDFOps.copies(of: PDFOps.pages(of: recognized)), actionName: "Recognize Text")
+        setPages(PDFOps.adopt(recognized), actionName: "Recognize Text")
         showToast(found > pageCount - scanned ? "Text recognized — the document is now searchable" : "No legible text found")
     }
 }

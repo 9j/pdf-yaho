@@ -14,7 +14,8 @@ struct SheetButtons: View {
             Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
             Button(confirm) {
                 dismiss()
-                DispatchQueue.main.async(execute: action)
+                // Let the sheet finish closing before the document changes underneath it.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: action)
             }
             .keyboardShortcut(.defaultAction)
             .disabled(disabled)

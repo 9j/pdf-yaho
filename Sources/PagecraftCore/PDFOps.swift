@@ -7,6 +7,28 @@ public enum PDFOps {
     public static let letter = CGSize(width: 612, height: 792)
     public static let a4 = CGSize(width: 595, height: 842)
 
+    /// Documents whose pages were handed out. A PDFPage can lose its content once the document
+    /// it was parsed from is freed, so documents built in memory are kept alive for the session.
+    nonisolated(unsafe) private static var sources: [PDFDocument] = []
+    private static let sourcesLock = NSLock()
+
+    /// The first page of freshly generated PDF data, safe to insert into another document.
+    static func page(fromPDFData data: Data) -> PDFPage? {
+        guard let doc = PDFDocument(data: data), let page = doc.page(at: 0)?.copy() as? PDFPage else { return nil }
+        sourcesLock.lock()
+        sources.append(doc)
+        sourcesLock.unlock()
+        return page
+    }
+
+    /// Copies of every page of `doc`, keeping `doc` alive so the copies stay valid.
+    public static func adopt(_ doc: PDFDocument) -> [PDFPage] {
+        sourcesLock.lock()
+        sources.append(doc)
+        sourcesLock.unlock()
+        return copies(of: pages(of: doc))
+    }
+
     public static func blankPage(size: CGSize = letter) -> PDFPage {
         let data = NSMutableData()
         var box = CGRect(origin: .zero, size: size)
@@ -16,8 +38,7 @@ public enum PDFOps {
         ctx.beginPDFPage(nil)
         ctx.endPDFPage()
         ctx.closePDF()
-        guard let page = PDFDocument(data: data as Data)?.page(at: 0)?.copy() as? PDFPage else { return PDFPage() }
-        return page
+        return page(fromPDFData: data as Data) ?? PDFPage()
     }
 
     public static func pages(of doc: PDFDocument) -> [PDFPage] {

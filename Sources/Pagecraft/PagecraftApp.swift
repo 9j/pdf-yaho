@@ -157,16 +157,32 @@ struct PagecraftCommands: Commands {
             Button("Remove All Annotations") { editor?.removeAllAnnotations() }
         }
         CommandMenu("Page") {
+            Menu("Insert") {
+                Button("Blank Page") { editor?.insertBlankPage() }.keyboardShortcut("n", modifiers: [.command, .option])
+                Button("From File…") { run(Exporter.insertFromFile) }
+                Button("From Images…") { editor?.insertImages() }
+                Button("From Clipboard") { editor?.insertFromClipboard() }
+            }
+            Button("Duplicate") { editor?.duplicatePages() }
+            Button("Delete") { editor?.deletePages() }.keyboardShortcut(.delete, modifiers: [.command])
+            Divider()
             Button("Rotate Left") { editor?.rotate(-90) }.keyboardShortcut("l")
             Button("Rotate Right") { editor?.rotate(90) }.keyboardShortcut("r")
+            Button("Reverse Order") { editor?.reversePages() }
             Divider()
-            Button("Insert Blank Page") { editor?.insertBlankPage() }.keyboardShortcut("n", modifiers: [.command, .option])
-            Button("Insert Pages from File…") { run(Exporter.insertFromFile) }
-            Button("Extract Pages…") { editor.map { Exporter.extract($0, indices: $0.targetPageIndices) } }
-            Button("Delete Page") { editor?.deletePages() }.keyboardShortcut(.delete, modifiers: [.command])
+            Button("Crop…") { editor?.beginCrop() }.keyboardShortcut("k", modifiers: [.command, .shift])
+            Button("Clear Margins") { editor?.autoCrop() }
+            Button("Reset Crop") { editor?.resetCrop() }
+            Button("Page Size…") { editor?.showPageSize = true }
             Divider()
-            Button("Add Page Numbers") { editor?.addPageNumbers() }
-            Button("Remove Page Numbers") { editor?.removePageNumbers() }
+            Button("Extract…") { editor.map { Exporter.extract($0, indices: $0.targetPageIndices) } }
+            Button("Split…") { editor?.showSplit = true }
+            Divider()
+            Button("Page Numbers…") { editor?.headerFooterPreset = .pageNumbers }
+            Button("Header & Footer…") { editor?.headerFooterPreset = .custom }
+            Button("Bates Numbering…") { editor?.headerFooterPreset = .bates }
+            Button("Remove Header, Footer & Numbers") { editor?.removeStamps() }
+            Divider()
             Button("Bookmark This Page") { editor?.addBookmark() }
                 .keyboardShortcut("d")
         }

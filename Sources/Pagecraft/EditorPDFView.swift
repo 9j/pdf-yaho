@@ -10,6 +10,7 @@ final class EditorPDFView: PDFView {
         case draw(page: PDFPage, start: CGPoint, stroke: [CGPoint])
         case move(SelectedAnnotation, start: CGPoint, original: CGRect)
         case resize(SelectedAnnotation, anchor: CGPoint, original: CGRect)
+        case crop(page: PDFPage, start: CGPoint)
     }
 
     private var drag: Drag?
@@ -124,6 +125,9 @@ final class EditorPDFView: PDFView {
         case .pen, .rectangle, .oval, .line, .arrow, .redact:
             editor.select(nil)
             drag = .draw(page: page, start: point, stroke: [point])
+        case .crop:
+            drag = .crop(page: page, start: point)
+            editor.cropDraft = nil
         }
     }
 
@@ -145,6 +149,12 @@ final class EditorPDFView: PDFView {
             Annotations.resize(selected.annotation, to: rect)
             annotationsChanged(on: selected.page)
             editor.objectWillChange.send()
+        case let .crop(page, start):
+            guard let (_, point, _) = pagePoint(event, page: page) else { return }
+            let media = page.bounds(for: .mediaBox)
+            let rect = CGRect(x: min(start.x, point.x), y: min(start.y, point.y),
+                              width: abs(point.x - start.x), height: abs(point.y - start.y)).intersection(media)
+            editor.cropDraft = (page, rect)
         case let .draw(page, start, stroke):
             guard let (_, point, _) = pagePoint(event, page: page) else { return }
             self.drag = .draw(page: page, start: start, stroke: stroke + [point])
@@ -163,6 +173,8 @@ final class EditorPDFView: PDFView {
                 editor.setBounds(now, of: selected.annotation, on: selected.page, previous: original)
             }
             if case .move = drag { NSCursor.openHand.set() }
+        case .crop:
+            break
         case let .draw(page, start, stroke):
             showPreview(nil, on: nil)
             guard let (_, point, _) = pagePoint(event, page: page) else { return }
@@ -212,9 +224,13 @@ final class EditorPDFView: PDFView {
             editor.deleteSelected()
             return
         case 53:
-            if editor.selected != nil { editor.select(nil) }
+            if editor.tool == .crop { editor.cropDraft = nil; editor.tool = .select }
+            else if editor.selected != nil { editor.select(nil) }
             else if editor.textSelectionActive { clearSelection(); editor.textSelectionActive = false }
             else if editor.tool != .select { editor.tool = .select }
+            return
+        case 36 where editor.cropDraft != nil:
+            editor.applyCrop(toAll: false)
             return
         case 36 where editor.selected != nil:
             editor.beginEditingSelected()

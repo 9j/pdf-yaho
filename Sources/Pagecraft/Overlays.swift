@@ -8,6 +8,20 @@ struct DocumentOverlays: View {
     var body: some View {
         GeometryReader { geo in
             ZStack(alignment: .topLeading) {
+                if let frame = editor.cropFrame {
+                    CropChrome(frame: frame, size: geo.size)
+                    CropBar(editor: editor)
+                        .fixedSize()
+                        .position(x: min(max(frame.midX, 200), geo.size.width - 200),
+                                  y: min(frame.maxY + 34, geo.size.height - 90))
+                } else if editor.tool == .crop {
+                    Text("Drag over the area of the page to keep · Esc to cancel")
+                        .font(.callout)
+                        .padding(.horizontal, 14)
+                        .frame(height: 32)
+                        .background(.regularMaterial, in: Capsule())
+                        .position(x: geo.size.width / 2, y: 30)
+                }
                 if let frame = editor.selectionFrame {
                     SelectionChrome(frame: frame, resizable: editor.selected.map { Annotations.isResizable($0.annotation) } ?? false)
                     AnnotationContextBar(editor: editor)
@@ -31,6 +45,48 @@ struct DocumentOverlays: View {
         let x = min(max(frame.midX, 140), size.width - 140)
         let y = frame.minY > 60 ? frame.minY - 30 : min(frame.maxY + 30, size.height - 80)
         return CGPoint(x: x, y: y)
+    }
+}
+
+struct CropChrome: View {
+    let frame: CGRect
+    let size: CGSize
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Path { path in
+                path.addRect(CGRect(origin: .zero, size: size))
+                path.addRect(frame)
+            }
+            .fill(Color.black.opacity(0.35), style: FillStyle(eoFill: true))
+            Rectangle()
+                .strokeBorder(Color.white, style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
+                .frame(width: frame.width, height: frame.height)
+                .offset(x: frame.minX, y: frame.minY)
+        }
+        .allowsHitTesting(false)
+    }
+}
+
+struct CropBar: View {
+    @ObservedObject var editor: EditorController
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "crop").foregroundStyle(.secondary)
+            Button("Cancel") { editor.cropDraft = nil; editor.tool = .select }
+            Button(editor.selectedPages.count > 1 ? "Crop \(editor.selectedPages.count) Pages" : "Crop This Page") {
+                editor.applyCrop(toAll: false)
+            }
+            Button("Crop All Pages") { editor.applyCrop(toAll: true) }
+                .buttonStyle(.borderedProminent)
+        }
+        .controlSize(.regular)
+        .padding(.horizontal, 12)
+        .frame(height: 44)
+        .background(.regularMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(.separator.opacity(0.6), lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.16), radius: 12, y: 4)
     }
 }
 

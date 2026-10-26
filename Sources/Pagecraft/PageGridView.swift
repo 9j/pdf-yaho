@@ -172,6 +172,30 @@ private struct PagesActionBar: View {
             .disabled(count == 0)
             ActionButton(symbol: "trash", label: "Delete", destructive: true) { editor.deletePages() }
                 .disabled(count == 0 || count == editor.pageCount)
+            Menu {
+                Section("Insert") {
+                    Button("From Images…") { editor.insertImages() }
+                    Button("From Clipboard") { editor.insertFromClipboard() }
+                }
+                Button("Duplicate") { editor.duplicatePages() }.disabled(count == 0)
+                Button("Reverse Order") { editor.reversePages() }
+                Divider()
+                Button("Crop…") { editor.beginCrop() }
+                Button("Clear Margins") { editor.autoCrop() }.disabled(count == 0)
+                Button("Page Size…") { editor.showPageSize = true }
+                Button("Split…") { editor.showSplit = true }
+                Divider()
+                Button("Page Numbers…") { editor.headerFooterPreset = .pageNumbers }
+                Button("Header & Footer…") { editor.headerFooterPreset = .custom }
+                Button("Bates Numbering…") { editor.headerFooterPreset = .bates }
+            } label: {
+                Image(systemName: "ellipsis.circle").font(.system(size: 15, weight: .medium)).frame(width: 34, height: 32)
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("More page tools")
             Divider().frame(height: 20)
             Image(systemName: "square.grid.3x3").font(.caption).foregroundStyle(.secondary)
             Slider(value: $size, in: 120...320).frame(width: 90).controlSize(.small)

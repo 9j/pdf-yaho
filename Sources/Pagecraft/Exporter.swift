@@ -43,6 +43,16 @@ enum Exporter {
         }
     }
 
+    static func split(_ editor: EditorController, mode: PageOps.SplitMode) {
+        guard let folder = Prompt.folder(title: "Choose a Folder for the Parts") else { return }
+        let parts = PageOps.split(editor.document, mode: mode)
+        for part in parts {
+            PDFOps.write(part.document, to: folder.appendingPathComponent("\(editor.title) (\(part.name)).pdf"),
+                         options: options(editor))
+        }
+        editor.showToast("Split into \(parts.count) files", url: folder)
+    }
+
     // MARK: Other formats
 
     static func rich(_ editor: EditorController, _ format: PDFOps.TextFormat) {
