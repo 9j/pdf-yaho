@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showWelcomeIfIdle() {
+        guard Preferences.showHomeWhenIdle else { return }
         let hasDocumentWindow = NSApp.windows.contains { $0.isVisible && NSDocumentController.shared.document(for: $0) != nil }
         if !hasDocumentWindow, NSApp.modalWindow == nil, !NSApp.windows.contains(where: { $0 is NSSavePanel && $0.isVisible }) {
             WelcomeWindowController.shared.show()
@@ -63,11 +64,11 @@ struct PagecraftCommands: Commands {
     var body: some Commands {
         CommandGroup(after: .newItem) {
             Button("New PDF from Images…") { Exporter.newFromImages() }
-            Button("Merge PDFs…") { Exporter.mergeFiles() }
+            Button("Merge Files…") { Exporter.mergeFiles() }
             Button("Convert File to PDF…") { Exporter.convertFiles() }
             Button("Compare PDFs…") { CompareWindow.chooseFiles() }
             Divider()
-            Button("Welcome to Pagecraft") { WelcomeWindowController.shared.show() }
+            Button("Home") { WelcomeWindowController.shared.show() }
                 .keyboardShortcut("1", modifiers: [.command, .shift])
         }
         CommandGroup(after: .saveItem) {
@@ -119,16 +120,18 @@ struct PagecraftCommands: Commands {
             Button("Find Previous") { editor?.findNext(-1) }.keyboardShortcut("g", modifiers: [.command, .shift])
         }
         CommandGroup(before: .toolbar) {
-            ForEach(Array(EditorMode.allCases.enumerated()), id: \.element) { index, mode in
-                Button(mode.rawValue) { editor?.mode = mode }
-                    .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .command)
+            Menu("Toolset") {
+                ForEach(Array(EditorMode.allCases.enumerated()), id: \.element) { index, mode in
+                    Button(mode.title) { editor?.mode = mode }
+                        .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .command)
+                }
             }
             Divider()
             Button("Zoom In") { editor?.zoomIn() }.keyboardShortcut("+")
             Button("Zoom Out") { editor?.zoomOut() }.keyboardShortcut("-")
             Button("Actual Size") { editor?.actualSize() }.keyboardShortcut("0")
             Button("Zoom to Fit Width") { editor?.fitWidth() }.keyboardShortcut("9")
-            Button("Zoom to Fit Page") { editor?.fitPage() }.keyboardShortcut("8")
+            Button("Zoom to Fit Page") { editor?.fitPage() }.keyboardShortcut("8", modifiers: [.command, .option])
             Divider()
             Menu("Page Layout") {
                 ForEach(PageLayout.allCases) { layout in Button(layout.rawValue) { editor?.layout = layout } }
@@ -136,7 +139,16 @@ struct PagecraftCommands: Commands {
             Menu("Theme") {
                 ForEach(ReadingTheme.allCases) { theme in Button(theme.rawValue) { editor?.theme = theme } }
             }
-            Button("Compare With Document…") { editor.map(CompareWindow.compare) }
+            Menu("Split View") {
+                Button("Side by Side") { if editor?.split == nil { editor?.openSplit(vertical: false) } else { editor?.split?.vertical = false } }
+                Button("Stacked") { if editor?.split == nil { editor?.openSplit(vertical: true) } else { editor?.split?.vertical = true } }
+                Button("Open Document in Split View…") { editor?.chooseSplitDocument() }
+                Divider()
+                Button("Swap Sides") { editor?.split?.swapped.toggle() }.disabled(editor?.split == nil)
+                Button("Close Split View") { editor?.closeSplit() }.disabled(editor?.split == nil)
+            }
+            .disabled(editor == nil)
+            Button("Compare in New Window…") { editor.map(CompareWindow.compare) }
                 .keyboardShortcut("c", modifiers: [.command, .option])
                 .disabled(editor == nil)
             Divider()
@@ -200,8 +212,10 @@ struct PagecraftCommands: Commands {
             Button("Bates Numbering…") { editor?.headerFooterPreset = .bates }
             Button("Remove Header, Footer & Numbers") { editor?.removeStamps() }
             Divider()
-            Button("Bookmark This Page") { editor?.addBookmark() }
+            Button(editor.map { $0.isBookmarked($0.currentPageIndex) } == true ? "Remove Bookmark" : "Bookmark This Page") { editor?.toggleBookmark() }
                 .keyboardShortcut("d")
+            Button("Add Outline Item") { editor?.addBookmark() }
+                .keyboardShortcut("d", modifiers: [.command, .option])
         }
     }
 

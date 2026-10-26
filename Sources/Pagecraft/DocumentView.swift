@@ -17,72 +17,49 @@ struct DocumentView: View {
     var body: some View {
         NavigationSplitView(columnVisibility: $columns) {
             SidebarView(editor: editor)
-                .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 340)
+                .navigationSplitViewColumnWidth(min: 190, ideal: 230, max: 360)
         } detail: {
-            ZStack {
-                PDFKitView(editor: editor)
-                    .overlay { DocumentOverlays(editor: editor) }
-                    .overlay(alignment: .top) {
-                        if editor.mode == .markup {
-                            MarkupPalette(editor: editor)
-                                .padding(.top, 12)
-                                .transition(.move(edge: .top).combined(with: .opacity))
-                        }
+            detail
+                .overlay(alignment: .bottom) {
+                    if let toast = editor.toast {
+                        ToastView(toast: toast)
+                            .padding(.bottom, 72)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
-                    .overlay(alignment: .bottom) { PageHUD(editor: editor).padding(.bottom, 16) }
-                if editor.mode == .pages {
-                    PageGridView(editor: editor)
-                        .transition(.opacity)
                 }
-            }
-            .overlay(alignment: .bottom) {
-                if let toast = editor.toast {
-                    ToastView(toast: toast)
-                        .padding(.bottom, 72)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-            }
-            .animation(.snappy(duration: 0.22), value: editor.mode)
+                .animation(.snappy(duration: 0.22), value: editor.mode)
         }
         .navigationSubtitle(editor.pageCount == 1 ? "1 page" : "\(editor.pageCount) pages")
         .toolbar {
             ToolbarItem(placement: .principal) {
-                Picker("Mode", selection: $editor.mode) {
-                    ForEach(EditorMode.allCases) { mode in
-                        Text(mode.rawValue).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 240)
-                .help("Read (⌘1) · Markup (⌘2) · Pages (⌘3)")
+                ToolsetSwitcher(editor: editor)
             }
             ToolbarItemGroup(placement: .primaryAction) {
-                Menu {
-                    Picker("Layout", selection: $editor.layout) {
-                        ForEach(PageLayout.allCases) { Text($0.rawValue).tag($0) }
-                    }
-                    .pickerStyle(.inline)
-                    Picker("Theme", selection: $editor.theme) {
-                        ForEach(ReadingTheme.allCases) { Text($0.rawValue).tag($0) }
-                    }
-                    .pickerStyle(.inline)
-                } label: {
-                    Label("Display", systemImage: "textformat.size")
-                }
-                .help("Page layout and reading theme")
+                DisplaySettingsButton(editor: editor)
                 Menu {
                     Button("Share Document…") { Exporter.share(editor, flattened: false) }
                     Button("Share Flattened…") { Exporter.share(editor, flattened: true) }
                     Divider()
                     Button("Mail Document") { Exporter.mail(editor, flattened: false) }
                     Button("Mail Flattened") { Exporter.mail(editor, flattened: true) }
+                    Divider()
+                    Button("Save As Flattened…") { Exporter.flattened(editor) }
+                    Button("Export as Word…") { Exporter.rich(editor, .word) }
+                    Button("Export as Images…") { editor.showExportImages = true }
                 } label: {
                     Label("Share", systemImage: "square.and.arrow.up")
                 }
-                .help("Share or mail this document")
+                .help("Share, mail or export this document")
             }
         }
         .searchable(text: $editor.searchText, placement: .toolbar, prompt: "Search")
+        .searchSuggestions {
+            if editor.searchText.isEmpty {
+                ForEach(editor.searchHistory, id: \.self) { query in
+                    Label(query, systemImage: "clock.arrow.circlepath").searchCompletion(query)
+                }
+            }
+        }
         .onSubmit(of: .search) { editor.search() }
         .onChange(of: editor.searchText) { _, text in if text.isEmpty { editor.clearSearch() } }
         .onChange(of: editor.mode) { old, mode in
@@ -93,15 +70,81 @@ struct DocumentView: View {
         .onAppear {
             editor.undoManager = undoManager
             WelcomeWindowController.shared.close()
+            if !Preferences.showSidebar { columns = .detailOnly }
             // The window is attached a moment after the view appears.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                 guard let window = editor.pdfView?.window else { return }
                 EditorRegistry.register(editor, window: window)
+                editor.loadBookmarks()
+                window.tabbingIdentifier = "PagecraftDocuments"
+                window.tabbingMode = Preferences.openInTabs ? .preferred : .disallowed
                 if let url = editor.fileURL, let action = DocumentLauncher.take(for: url) { editor.perform(action) }
+                #if DEBUG
+                // Lets automated screenshots start in a given toolset without input events.
+                if let raw = ProcessInfo.processInfo.environment["PAGECRAFT_QA_MODE"], let mode = EditorMode(rawValue: raw) { editor.mode = mode }
+                if ProcessInfo.processInfo.environment["PAGECRAFT_QA_SPLIT"] != nil { editor.openSplit() }
+                #endif
             }
         }
         .onChange(of: undoManager) { _, manager in editor.undoManager = manager }
         .modifier(DocumentSheets(editor: editor))
+    }
+
+    /// The document, optionally beside a second document in split view.
+    @ViewBuilder private var detail: some View {
+        if let split = editor.split {
+            if split.vertical {
+                VSplitView { splitChildren(split) }
+            } else {
+                HSplitView { splitChildren(split) }
+            }
+        } else {
+            documentArea
+        }
+    }
+
+    @ViewBuilder private func splitChildren(_ split: SplitState) -> some View {
+        if split.swapped {
+            SplitPaneView(editor: editor).frame(minWidth: 280, minHeight: 200)
+            documentArea.frame(minWidth: 360, minHeight: 240)
+        } else {
+            documentArea.frame(minWidth: 360, minHeight: 240)
+            SplitPaneView(editor: editor).frame(minWidth: 280, minHeight: 200)
+        }
+    }
+
+    private var documentArea: some View {
+        ZStack {
+            PDFKitView(editor: editor)
+                .overlay { DocumentOverlays(editor: editor) }
+                .overlay(alignment: .top) {
+                    VStack(spacing: 8) {
+                        if editor.mode.isMarkup {
+                            ToolsetBar(editor: editor)
+                                .transition(.move(edge: .top).combined(with: .opacity))
+                        } else if editor.mode == .scan {
+                            ScanBar(editor: editor)
+                                .transition(.move(edge: .top).combined(with: .opacity))
+                        }
+                        if let target = editor.backTarget {
+                            BackToPagePill(editor: editor, page: target)
+                                .transition(.move(edge: .top).combined(with: .opacity))
+                        }
+                    }
+                    .padding(.top, 12)
+                    .animation(.snappy(duration: 0.2), value: editor.backTarget)
+                }
+                .overlay(alignment: .bottom) {
+                    PageHUD(editor: editor)
+                        .padding(.bottom, 16)
+                        .opacity(editor.hudVisible ? 1 : 0)
+                        .animation(.easeInOut(duration: 0.25), value: editor.hudVisible)
+                }
+            if editor.mode == .pages {
+                PageGridView(editor: editor)
+                    .transition(.opacity)
+            }
+        }
     }
 }
 

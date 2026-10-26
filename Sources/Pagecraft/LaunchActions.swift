@@ -53,13 +53,13 @@ enum EditorRegistry {
 extension EditorController {
     func perform(_ action: LaunchAction) {
         switch action {
-        case .annotate: mode = .markup; tool = .highlight
-        case .draw: mode = .markup; tool = .pen
-        case .fillAndSign: mode = .markup; tool = .text
-        case .sign: mode = .markup; tool = .signature
-        case .measure: mode = .markup; tool = .measureDistance
-        case .redact: mode = .markup; tool = .redact
-        case .scan: recognizeText()
+        case .annotate: mode = .annotate
+        case .draw: mode = .draw
+        case .fillAndSign: mode = .fillSign
+        case .sign: mode = .fillSign; tool = .signature
+        case .measure: mode = .measure
+        case .redact: mode = .redact
+        case .scan: mode = .scan
         case .pages: mode = .pages
         case .compress: showReduceSize = true
         case .recognizeText: recognizeText()

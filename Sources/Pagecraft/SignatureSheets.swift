@@ -179,18 +179,3 @@ struct LinkSheet: View {
         .frame(width: 420)
     }
 }
-
-struct SettingsView: View {
-    @AppStorage("authorName") private var author = ""
-
-    var body: some View {
-        Form {
-            TextField("Author name", text: $author, prompt: Text(NSFullUserName()))
-            Text("Shown as the author of your highlights, notes and stamps in other PDF apps.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .formStyle(.grouped)
-        .frame(width: 440, height: 140)
-    }
-}

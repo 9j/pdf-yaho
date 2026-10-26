@@ -24,12 +24,20 @@ final class EditorPDFView: PDFView {
     var scrollView: NSScrollView? { documentView?.enclosingScrollView }
     override var acceptsFirstResponder: Bool { true }
 
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        editor?.hoverPage = nil
+    }
+
     /// Auto-scaling settles after the first layout and leaves the view mid-page; start at the top instead.
     override func layout() {
         super.layout()
         guard !didShowFirstPage, bounds.width > 0, let first = document?.page(at: 0) else { return }
         didShowFirstPage = true
+        let pending = editor?.pendingDestination
+        editor?.pendingDestination = nil
         DispatchQueue.main.async { [weak self] in
+            if let pending { self?.go(to: pending); return }
             let box = first.bounds(for: .cropBox)
             self?.go(to: PDFDestination(page: first, at: CGPoint(x: box.minX, y: box.maxY)))
         }
@@ -45,7 +53,7 @@ final class EditorPDFView: PDFView {
     private func hit(_ point: CGPoint, on page: PDFPage) -> PDFAnnotation? {
         let slack = 4 / max(scaleFactor, 0.1)
         // Links are followed when reading and edited in Markup mode.
-        let editing = editor?.mode == .markup
+        let editing = editor?.mode.isMarkup == true
         return page.annotations.reversed().first {
             (Annotations.isUserEditable($0) || (editing && ["Link", "Widget"].contains($0.type ?? "")))
                 && $0.bounds.insetBy(dx: -slack, dy: -slack).contains(point)
@@ -72,6 +80,9 @@ final class EditorPDFView: PDFView {
     override func mouseMoved(with event: NSEvent) {
         guard let editor else { return super.mouseMoved(with: event) }
         let loc = convert(event.locationInWindow, from: nil)
+        let hovered = page(for: loc, nearest: false)
+        if hovered !== editor.hoverPage { editor.hoverPage = hovered }
+        if loc.y < 70 { editor.pokeHUD() }
         if resizeAnchor(at: loc) != nil { NSCursor.crosshair.set(); return }
         switch editor.tool {
         case .select, .highlight, .underline, .strikeout:

@@ -8,6 +8,11 @@ struct DocumentOverlays: View {
     var body: some View {
         GeometryReader { geo in
             ZStack(alignment: .topLeading) {
+                if editor.mode == .read || editor.mode == .annotate, let page = editor.hoverPage, let frame = editor.hoverPageFrame {
+                    let index = editor.document.index(for: page)
+                    BookmarkRibbon(marked: editor.isBookmarked(index)) { editor.toggleBookmark(index) }
+                        .position(x: frame.maxX - 22, y: max(frame.minY, 0) + 18)
+                }
                 if let frame = editor.cropFrame {
                     CropChrome(frame: frame, size: geo.size)
                     CropBar(editor: editor)
@@ -45,6 +50,26 @@ struct DocumentOverlays: View {
         let x = min(max(frame.midX, 140), size.width - 140)
         let y = frame.minY > 60 ? frame.minY - 30 : min(frame.maxY + 30, size.height - 80)
         return CGPoint(x: x, y: y)
+    }
+}
+
+/// Bookmark toggle shown in the top corner of the page under the pointer.
+struct BookmarkRibbon: View {
+    let marked: Bool
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: marked ? "bookmark.fill" : "bookmark")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(marked ? Color.red : Color.secondary.opacity(hovering ? 0.9 : 0.5))
+                .frame(width: 30, height: 34)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(marked ? "Remove bookmark (⌘D)" : "Bookmark this page (⌘D)")
     }
 }
 
@@ -291,6 +316,7 @@ struct PageHUD: View {
         .background(.regularMaterial, in: Capsule())
         .overlay(Capsule().strokeBorder(.separator.opacity(0.6), lineWidth: 0.5))
         .shadow(color: .black.opacity(0.14), radius: 12, y: 4)
+        .onHover { editor.hudHovered = $0 }
         .onAppear { pageText = "\(editor.currentPageIndex + 1)" }
         .onChange(of: editor.currentPageIndex) { _, index in if !pageFocused { pageText = "\(index + 1)" } }
         .onChange(of: pageFocused) { _, focused in if !focused { pageText = "\(editor.currentPageIndex + 1)" } }

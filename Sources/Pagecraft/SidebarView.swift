@@ -28,6 +28,7 @@ struct SidebarView: View {
             Group {
                 switch editor.sidebarTab {
                 case .thumbnails: ThumbnailList(editor: editor)
+                case .bookmarks: BookmarkList(editor: editor)
                 case .outline: OutlineList(editor: editor)
                 case .annotations: AnnotationList(editor: editor)
                 case .search: SearchResultList(editor: editor)
@@ -108,11 +109,11 @@ struct OutlineList: View {
         VStack(spacing: 0) {
             if nodes.isEmpty {
                 ContentUnavailableView {
-                    Label("No Bookmarks", systemImage: "bookmark")
+                    Label("No Outline", systemImage: "list.bullet.indent")
                 } description: {
-                    Text("Bookmark pages you want to find again.")
+                    Text("The outline is the document’s table of contents, saved inside the PDF.")
                 } actions: {
-                    Button("Bookmark This Page") { editor.addBookmark() }
+                    Button("Add Item for This Page") { editor.addBookmark() }
                 }
             } else {
                 List(nodes, children: \.children) { node in
@@ -120,7 +121,8 @@ struct OutlineList: View {
                 }
                 .listStyle(.sidebar)
                 SidebarFooter {
-                    Button { editor.addBookmark() } label: { Label("Bookmark This Page", systemImage: "plus") }
+                    Button { editor.addBookmark() } label: { Label("Add Item", systemImage: "plus") }
+                        .help("Add an outline item for the current page (⌥⌘D)")
                 }
             }
         }
@@ -147,13 +149,67 @@ struct OutlineList: View {
             .onTapGesture { if let destination = node.item.destination { editor.pdfView?.go(to: destination) } }
             .contextMenu {
                 Button("Rename") { draft = node.item.label ?? ""; renaming = node.id }
+                Button("Point to Current Page") { editor.retarget(node.item) }
+                Divider()
+                Button("Delete", role: .destructive) { editor.deleteOutlineItem(node.item) }
             }
         }
     }
 }
 
+/// Personal bookmarks: quick links to pages, kept on this Mac.
+struct BookmarkList: View {
+    @ObservedObject var editor: EditorController
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if editor.bookmarks.isEmpty {
+                ContentUnavailableView {
+                    Label("No Bookmarks", systemImage: "bookmark")
+                } description: {
+                    Text("Hover over a page and click the ribbon in its corner, or press ⌘D.")
+                } actions: {
+                    Button("Bookmark This Page") { editor.toggleBookmark() }
+                }
+            } else {
+                List {
+                    ForEach(editor.bookmarks, id: \.self) { index in
+                        HStack(spacing: 10) {
+                            if let image = editor.thumbnail(for: index) {
+                                Image(nsImage: image).resizable().aspectRatio(contentMode: .fit).frame(width: 34, height: 44)
+                                    .background(.white).shadow(color: .black.opacity(0.15), radius: 1, y: 0.5)
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Page \(index + 1)").font(.callout.weight(.medium))
+                                Text(snippet(index)).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                            }
+                            Spacer()
+                        }
+                        .padding(.vertical, 2)
+                        .contentShape(Rectangle())
+                        .onTapGesture { editor.goToPage(index) }
+                        .contextMenu {
+                            Button("Remove Bookmark", role: .destructive) { editor.toggleBookmark(index) }
+                        }
+                    }
+                }
+                .listStyle(.sidebar)
+            }
+        }
+    }
+
+    private func snippet(_ index: Int) -> String {
+        let text = editor.document.page(at: index)?.string ?? ""
+        return text.split(whereSeparator: \.isNewline).first.map(String.init)?.trimmingCharacters(in: .whitespaces) ?? ""
+    }
+}
+
 struct AnnotationList: View {
     @ObservedObject var editor: EditorController
+    @State private var typeFilter: Set<String> = []
+    @State private var colorFilter: String?
+    @State private var authorFilter: String?
+    @State private var query = ""
 
     private struct Item: Identifiable {
         let id: ObjectIdentifier
@@ -161,34 +217,116 @@ struct AnnotationList: View {
         let annotation: PDFAnnotation
     }
 
-    private var groups: [(index: Int, items: [Item])] {
+    private static func colorKey(_ c: NSColor) -> String {
+        let c = Palette.srgb(c)
+        return String(format: "%02X%02X%02X", Int(c.redComponent * 255), Int(c.greenComponent * 255), Int(c.blueComponent * 255))
+    }
+
+    private var all: [(index: Int, items: [Item])] {
         PDFOps.pages(of: editor.document).enumerated().compactMap { index, page in
             let items = page.annotations.filter(Annotations.isUserEditable)
-                .filter { $0.userName != PDFOps.pageNumberTag }
+                .filter { $0.userName != PDFOps.pageNumberTag && $0.userName != PageOps.stampTag }
                 .map { Item(id: ObjectIdentifier($0), page: page, annotation: $0) }
             return items.isEmpty ? nil : (index, items)
         }
     }
 
+    private func matches(_ item: Item) -> Bool {
+        let a = item.annotation
+        if !typeFilter.isEmpty, !typeFilter.contains(Annotations.displayName(a)) { return false }
+        if let colorFilter, Self.colorKey(Annotations.color(of: a)) != colorFilter { return false }
+        if let authorFilter, a.userName != authorFilter { return false }
+        if !query.isEmpty {
+            let text = (Annotations.markedText(a, on: item.page) ?? "") + " " + (a.contents ?? "")
+            if !text.localizedCaseInsensitiveContains(query) { return false }
+        }
+        return true
+    }
+
     var body: some View {
-        let groups = self.groups
+        let all = self.all
+        let groups = all.compactMap { group -> (index: Int, items: [Item])? in
+            let items = group.items.filter(matches)
+            return items.isEmpty ? nil : (group.index, items)
+        }
+        let flat = all.flatMap(\.items)
+        let types = Array(Set(flat.map { Annotations.displayName($0.annotation) })).sorted()
+        let colors = Array(Set(flat.map { Self.colorKey(Annotations.color(of: $0.annotation)) })).sorted()
+        let authors = Array(Set(flat.compactMap { $0.annotation.userName }.filter { !$0.hasPrefix("org.pagecraft") })).sorted()
+        let filtering = !typeFilter.isEmpty || colorFilter != nil || authorFilter != nil || !query.isEmpty
         VStack(spacing: 0) {
-            if groups.isEmpty {
+            if flat.isEmpty {
                 ContentUnavailableView("No Annotations", systemImage: "highlighter",
                                        description: Text("Highlights, notes and drawings appear here."))
             } else {
-                List {
-                    ForEach(groups, id: \.index) { group in
-                        Section("Page \(group.index + 1)") {
-                            ForEach(group.items) { item in
-                                AnnotationRow(editor: editor, page: item.page, annotation: item.annotation)
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary).font(.caption)
+                    TextField("Filter", text: $query).textFieldStyle(.plain).font(.callout)
+                    Menu {
+                        Section("Type") {
+                            ForEach(types, id: \.self) { type in
+                                Toggle(type, isOn: Binding(get: { typeFilter.contains(type) },
+                                                           set: { if $0 { typeFilter.insert(type) } else { typeFilter.remove(type) } }))
+                            }
+                        }
+                        if colors.count > 1 {
+                            Picker("Colour", selection: $colorFilter) {
+                                Text("Any Colour").tag(String?.none)
+                                ForEach(colors, id: \.self) { key in
+                                    Label("#" + key, systemImage: "circle.fill").tag(Optional(key))
+                                }
+                            }
+                        }
+                        if authors.count > 1 {
+                            Picker("Author", selection: $authorFilter) {
+                                Text("Anyone").tag(String?.none)
+                                ForEach(authors, id: \.self) { Text($0).tag(Optional($0)) }
+                            }
+                        }
+                        if filtering {
+                            Divider()
+                            Button("Clear Filters") { typeFilter = []; colorFilter = nil; authorFilter = nil; query = "" }
+                        }
+                    } label: {
+                        Image(systemName: filtering ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("Filter by type, colour or author")
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(RoundedRectangle(cornerRadius: 7).fill(Color.primary.opacity(0.05)))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                if groups.isEmpty {
+                    ContentUnavailableView("No Matches", systemImage: "line.3.horizontal.decrease.circle",
+                                           description: Text("No annotations match the filter."))
+                } else {
+                    List {
+                        ForEach(groups, id: \.index) { group in
+                            Section("Page \(group.index + 1)") {
+                                ForEach(group.items) { item in
+                                    AnnotationRow(editor: editor, page: item.page, annotation: item.annotation)
+                                }
                             }
                         }
                     }
+                    .listStyle(.sidebar)
                 }
-                .listStyle(.sidebar)
                 SidebarFooter {
-                    Button { Exporter.annotationSummary(editor) } label: { Label("Export Summary…", systemImage: "square.and.arrow.up") }
+                    Text(filtering ? "\(groups.reduce(0) { $0 + $1.items.count }) of \(flat.count)" : "\(flat.count) annotations")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Menu {
+                        Button("Summary (Markdown)…") { Exporter.annotationSummary(editor) }
+                        Button("XFDF…") { Exporter.xfdf(editor) }
+                    } label: {
+                        Label("Export", systemImage: "square.and.arrow.up")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
                 }
             }
         }
@@ -208,7 +346,16 @@ private struct AnnotationRow: View {
                 .fill(Color(nsColor: Annotations.color(of: annotation)))
                 .frame(width: 3)
             VStack(alignment: .leading, spacing: 2) {
-                Text(Annotations.displayName(annotation)).font(.callout.weight(.medium))
+                HStack(spacing: 6) {
+                    Text(Annotations.displayName(annotation)).font(.callout.weight(.medium))
+                    Spacer(minLength: 4)
+                    if let date = annotation.modificationDate {
+                        Text(date.formatted(.relative(presentation: .named))).font(.caption2).foregroundStyle(.tertiary)
+                    }
+                }
+                if let author = annotation.userName, !author.hasPrefix("org.pagecraft") {
+                    Text(author).font(.caption2).foregroundStyle(.tertiary)
+                }
                 if !detail.isEmpty {
                     Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(3)
                 }

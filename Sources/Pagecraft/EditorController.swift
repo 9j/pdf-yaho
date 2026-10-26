@@ -3,15 +3,79 @@ import PDFKit
 import PagecraftCore
 import SwiftUI
 
+/// The toolset shown in the toolbar. Each one brings its own floating tool bar, so no single
+/// palette has to hold every tool.
 enum EditorMode: String, CaseIterable, Identifiable {
-    case read = "Read", markup = "Markup", pages = "Pages"
+    case read, annotate, draw, fillSign, measure, redact, scan, pages
     var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .read: "Read"
+        case .annotate: "Annotate"
+        case .draw: "Draw"
+        case .fillSign: "Fill & Sign"
+        case .measure: "Measure"
+        case .redact: "Redact"
+        case .scan: "Scan"
+        case .pages: "Pages"
+        }
+    }
+
     var symbol: String {
         switch self {
         case .read: "book"
-        case .markup: "pencil.tip.crop.circle"
+        case .annotate: "highlighter"
+        case .draw: "pencil.and.scribble"
+        case .fillSign: "signature"
+        case .measure: "ruler"
+        case .redact: "eye.slash"
+        case .scan: "doc.viewfinder"
         case .pages: "square.grid.2x2"
         }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .read: "Read without tools"
+        case .annotate: "Highlight, notes, stamps and links"
+        case .draw: "Pens and shapes"
+        case .fillSign: "Fill forms, sign and add form fields"
+        case .measure: "Distances and areas"
+        case .redact: "Remove sensitive content"
+        case .scan: "OCR, enhance scans, trim and split pages"
+        case .pages: "Reorder, insert, rotate and delete pages"
+        }
+    }
+
+    /// Toolsets that edit annotations on the page.
+    var isMarkup: Bool { [.annotate, .draw, .fillSign, .measure, .redact].contains(self) }
+
+    var tools: [Tool] {
+        switch self {
+        case .annotate: [.select, .highlight, .underline, .strikeout, .text, .note, .stamp, .image, .link, .eraser]
+        case .draw: [.select, .pen, .marker, .rectangle, .oval, .line, .arrow, .doubleArrow, .polygon, .polyline, .eraser]
+        case .fillSign: [.select, .text, .checkmark, .cross, .date, .signature, .stamp, .formText, .formCheckbox, .formRadio, .formChoice, .eraser]
+        case .measure: [.select, .measureDistance, .measurePerimeter, .measureArea, .eraser]
+        case .redact: [.select, .redact, .eraser]
+        case .read, .scan, .pages: [.select, .crop, .snapshot]
+        }
+    }
+
+    var defaultTool: Tool {
+        switch self {
+        case .annotate: .highlight
+        case .draw: .pen
+        case .fillSign: .text
+        case .measure: .measureDistance
+        case .redact: .redact
+        default: .select
+        }
+    }
+
+    /// The toolset a tool belongs to when the current one does not offer it.
+    static func home(of tool: Tool) -> EditorMode? {
+        [EditorMode.annotate, .draw, .fillSign, .measure, .redact].first { $0.tools.contains(tool) }
     }
 }
 
@@ -81,7 +145,7 @@ enum Tool: String, CaseIterable, Identifiable {
         case .strikeout: "strikethrough"
         case .pen: "pencil.tip"
         case .marker: "paintbrush.pointed"
-        case .text: "character.textbox"
+        case .text: "textformat"
         case .note: "note.text"
         case .rectangle: "rectangle"
         case .oval: "circle"
@@ -100,7 +164,7 @@ enum Tool: String, CaseIterable, Identifiable {
         case .measureDistance: "ruler"
         case .measurePerimeter: "point.3.connected.trianglepath.dotted"
         case .measureArea: "square.dashed"
-        case .formText: "character.cursor.ibeam"
+        case .formText: "rectangle.and.pencil.and.ellipsis"
         case .formCheckbox: "checkmark.square"
         case .formRadio: "largecircle.fill.circle"
         case .formChoice: "filemenu.and.selection"
@@ -240,11 +304,12 @@ enum ReadingTheme: String, CaseIterable, Identifiable {
 }
 
 enum SidebarTab: String, CaseIterable, Identifiable {
-    case thumbnails = "Pages", outline = "Outline", annotations = "Annotations", search = "Search"
+    case thumbnails = "Pages", bookmarks = "Bookmarks", outline = "Outline", annotations = "Annotations", search = "Search"
     var id: String { rawValue }
     var symbol: String {
         switch self {
         case .thumbnails: "square.grid.2x2"
+        case .bookmarks: "bookmark"
         case .outline: "list.bullet.indent"
         case .annotations: "highlighter"
         case .search: "magnifyingglass"
@@ -301,8 +366,24 @@ final class EditorController: ObservableObject {
     /// Bumped whenever on-screen geometry changes so overlays re-measure.
     @Published private(set) var overlayTick = 0
 
-    @Published var layout: PageLayout = .continuous { didSet { applyLayout() } }
-    @Published var theme: ReadingTheme = .day { didSet { applyTheme() } }
+    @Published var layout: PageLayout = Preferences.defaultLayout { didSet { applyLayout() } }
+    @Published var theme: ReadingTheme = Preferences.defaultTheme { didSet { applyTheme() } }
+    /// Second document shown beside this one.
+    @Published var split: SplitState? { didSet { splitChanged(from: oldValue) } }
+    /// Page to return to after a jump through a link, the outline or search.
+    @Published var backTarget: Int?
+    @Published private var hudAwake = true
+    @Published var hudHovered = false
+    /// Page under the pointer, for the bookmark ribbon.
+    @Published var hoverPage: PDFPage?
+    @Published var searchHistory: [String] = UserDefaults.standard.stringArray(forKey: "searchHistory") ?? []
+    /// Personal bookmarks (page indices), kept per file outside the PDF.
+    @Published private(set) var bookmarks: [Int] = []
+    /// Where to put a freshly created PDF view (for example after split view toggles).
+    var pendingDestination: PDFDestination?
+    private var hudTimer: DispatchWorkItem?
+    private var backTimer: DispatchWorkItem?
+    private var splitSync: ScrollSync?
     @Published var sidebarTab: SidebarTab = .thumbnails
     @Published var selectedPages: Set<Int> = []
     @Published private(set) var currentPageIndex = 0
@@ -338,6 +419,10 @@ final class EditorController: ObservableObject {
     }
 
     var pageCount: Int { document.pageCount }
+    var redactionCount: Int {
+        PDFOps.pages(of: document).reduce(0) { $0 + $1.annotations.filter(Annotations.isRedaction).count }
+    }
+
     var hasRedactions: Bool {
         PDFOps.pages(of: document).contains { $0.annotations.contains(where: Annotations.isRedaction) }
     }
@@ -379,6 +464,9 @@ final class EditorController: ObservableObject {
             center.addObserver(forName: .PDFViewSelectionChanged, object: view, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.scheduleViewSync() }
             },
+            center.addObserver(forName: .PDFViewChangedHistory, object: view, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.historyChanged() }
+            },
             center.addObserver(forName: .PDFViewAnnotationHit, object: view, queue: .main) { [weak self] note in
                 // Form widgets are edited by PDFKit directly; record that the document changed.
                 let annotation = note.userInfo?["PDFAnnotationHit"] as? PDFAnnotation
@@ -400,6 +488,106 @@ final class EditorController: ObservableObject {
 
     private var viewSyncPending = false
 
+    // MARK: Page indicator, history and bookmarks
+
+    var hudVisible: Bool {
+        switch Preferences.pageIndicator {
+        case .always: true
+        case .never: false
+        case .automatic: hudAwake || hudHovered || mode == .pages
+        }
+    }
+
+    /// Shows the page indicator, then fades it after a pause.
+    func pokeHUD() {
+        if !hudAwake { hudAwake = true }
+        hudTimer?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.hudAwake = false }
+        hudTimer = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5, execute: work)
+        objectWillChange.send()
+    }
+
+    private var historyFrom: Int?
+
+    private func historyChanged() {
+        // The page we were on before the jump; currentPageIndex has not been synced yet.
+        let from = currentPageIndex
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let view = self.pdfView, view.canGoBack, let page = view.currentPage else { return }
+            let to = self.document.index(for: page)
+            guard abs(to - from) > 1 else { return }
+            self.backTarget = from
+            self.backTimer?.cancel()
+            let work = DispatchWorkItem { [weak self] in self?.backTarget = nil }
+            self.backTimer = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 10, execute: work)
+        }
+    }
+
+    func returnToBackTarget() {
+        guard let target = backTarget else { return }
+        backTarget = nil
+        if let view = pdfView, view.canGoBack { view.goBack(nil) } else { goToPage(target) }
+    }
+
+    private var bookmarkKey: String? { fileURL.map { "bookmarks:" + $0.standardizedFileURL.resolvingSymlinksInPath().path } }
+
+    func loadBookmarks() {
+        guard let key = bookmarkKey else { return }
+        bookmarks = (UserDefaults.standard.array(forKey: key) as? [Int] ?? []).filter { $0 < pageCount }.sorted()
+    }
+
+    func isBookmarked(_ index: Int) -> Bool { bookmarks.contains(index) }
+
+    func toggleBookmark(_ index: Int? = nil) {
+        let index = index ?? currentPageIndex
+        if let i = bookmarks.firstIndex(of: index) { bookmarks.remove(at: i) } else { bookmarks = (bookmarks + [index]).sorted() }
+        if let key = bookmarkKey { UserDefaults.standard.set(bookmarks, forKey: key) }
+        showToast(isBookmarked(index) ? "Bookmarked page \(index + 1)" : "Bookmark removed")
+    }
+
+    // MARK: Split view
+
+    func openSplit(vertical: Bool = false) {
+        split = SplitState(vertical: vertical)
+    }
+
+    func closeSplit() { split = nil }
+
+    func chooseSplitDocument() {
+        guard let url = Prompt.open([.pdf], multiple: false, title: "Open in Split View").first else { return }
+        openSplitDocument(url)
+    }
+
+    func openSplitDocument(_ url: URL) {
+        guard let doc = PDFDocument(url: url) else { Prompt.error("Could not open \(url.lastPathComponent).") ; return }
+        if doc.isLocked {
+            guard let password = Prompt.text("Password Required", message: "“\(url.lastPathComponent)” is password protected.", secure: true),
+                  doc.unlock(withPassword: password) else { return }
+        }
+        var state = split ?? SplitState(vertical: false)
+        state.document = doc
+        state.title = url.deletingPathExtension().lastPathComponent
+        split = state
+    }
+
+    /// Remembers where the main view is so a re-created PDF view can return there.
+    private func splitChanged(from old: SplitState?) {
+        let layoutChanged = (old == nil) != (split == nil) || old?.vertical != split?.vertical || old?.swapped != split?.swapped
+        if layoutChanged, let view = pdfView, let destination = view.currentDestination { pendingDestination = destination }
+        if old?.document !== split?.document { splitSync = nil }
+        splitSync?.enabled = split?.sync ?? false
+    }
+
+    func attachSplitView(_ view: PDFView) {
+        let sync = ScrollSync()
+        sync.enabled = split?.sync ?? true
+        if let main = pdfView { sync.attach(main, isLeft: true) }
+        sync.attach(view, isLeft: false)
+        splitSync = sync
+    }
+
     /// Coalesces PDFView geometry and page changes into one SwiftUI update after the current layout pass.
     private func scheduleViewSync() {
         guard !viewSyncPending else { return }
@@ -413,8 +601,9 @@ final class EditorController: ObservableObject {
                 if index != self.currentPageIndex { self.currentPageIndex = index }
             }
             if abs(view.scaleFactor - self.scale) > 0.001 { self.scale = view.scaleFactor }
+            self.pokeHUD()
             if self.textSelectionActive, (view.currentSelection?.string ?? "").isEmpty { self.textSelectionActive = false }
-            if self.selected != nil || self.textSelectionActive || self.cropDraft != nil { self.overlayTick += 1 }
+            if self.selected != nil || self.textSelectionActive || self.cropDraft != nil || self.hoverPage != nil { self.overlayTick += 1 }
         }
     }
 
@@ -483,6 +672,11 @@ final class EditorController: ObservableObject {
         return cropDraft.flatMap { viewRect($0.rect, on: $0.page) }
     }
 
+    var hoverPageFrame: CGRect? {
+        _ = overlayTick
+        return hoverPage.flatMap { viewRect($0.bounds(for: .cropBox), on: $0) }
+    }
+
     var textSelectionFrame: CGRect? {
         _ = overlayTick
         guard textSelectionActive, let selection = pdfView?.currentSelection, let page = selection.pages.first else { return nil }
@@ -491,16 +685,17 @@ final class EditorController: ObservableObject {
 
     // MARK: Modes and tools
 
+    private var lastTool: [EditorMode: Tool] = [:]
+
     private func modeChanged(from old: EditorMode) {
         guard mode != old else { return }
         select(nil)
-        switch mode {
-        case .read: tool = .select
-        case .markup: if tool == .select { tool = lastMarkupTool }
-        case .pages:
-            tool = .select
-            selectedPages = [currentPageIndex]
+        pdfView?.commitInline()
+        if old.isMarkup { lastTool[old] = tool }
+        if !mode.tools.contains(tool) || tool == .select {
+            tool = lastTool[mode] ?? mode.defaultTool
         }
+        if mode == .pages { selectedPages = [currentPageIndex] }
     }
 
     private func toolChanged() {
@@ -511,7 +706,7 @@ final class EditorController: ObservableObject {
         if Tool.pens.contains(tool) { lastPen = tool }
         if Tool.fillAndSign.contains(tool) { lastFillAndSign = tool }
         if Tool.measures.contains(tool) { lastMeasure = tool }
-        if !tool.isUtility, mode != .markup { mode = .markup }
+        if !mode.tools.contains(tool), let home = EditorMode.home(of: tool) { mode = home }
         if tool != .select { select(nil) }
         if let type = tool.markupType, let selection = pdfView?.currentSelection, !(selection.string ?? "").isEmpty {
             applyMarkup(type, to: selection)
@@ -984,7 +1179,7 @@ final class EditorController: ObservableObject {
         let marks = Search.redactionMarks(for: results, style: style)
         for (page, annotation) in marks { add(annotation, to: page) }
         undoManager?.setActionName("Mark for Redaction")
-        if mode != .markup { mode = .markup }
+        if mode != .redact { mode = .redact }
         if let first = results.first { go(to: first) }
         showToast("Marked \(results.count) \(results.count == 1 ? "match" : "matches") — review, then Apply Redactions")
     }
@@ -1251,6 +1446,29 @@ final class EditorController: ObservableObject {
         if label == nil { showToast("Bookmarked page \(index + 1)") }
     }
 
+    func deleteOutlineItem(_ item: PDFOutline) {
+        guard let parent = item.parent else { return }
+        let index = (0..<parent.numberOfChildren).first { parent.child(at: $0) === item } ?? parent.numberOfChildren
+        item.removeFromParent()
+        registerUndo("Delete Outline Item") { editor in
+            parent.insertChild(item, at: index)
+            editor.changed()
+        }
+        changed()
+    }
+
+    func retarget(_ item: PDFOutline) {
+        guard let page = pdfView?.currentPage else { return }
+        let previous = item.destination
+        item.destination = pdfView?.currentDestination ?? PDFDestination(page: page, at: CGPoint(x: 0, y: page.bounds(for: .cropBox).maxY))
+        registerUndo("Change Destination") { editor in
+            item.destination = previous
+            editor.changed()
+        }
+        changed()
+        showToast("Now points to page \(document.index(for: page) + 1)")
+    }
+
     func rename(_ item: PDFOutline, to label: String) {
         let previous = item.label ?? ""
         item.label = label
@@ -1326,6 +1544,8 @@ final class EditorController: ObservableObject {
     func search() {
         let query = searchText.trimmingCharacters(in: .whitespaces)
         guard !query.isEmpty else { clearSearch(); return }
+        searchHistory = Array(([query] + searchHistory.filter { $0 != query }).prefix(10))
+        UserDefaults.standard.set(searchHistory, forKey: "searchHistory")
         if mode == .pages { mode = .read }
         searchResults = Search.find(query, in: document, matchCase: searchMatchCase, wholeWords: searchWholeWords)
         for result in searchResults { result.color = NSColor.systemYellow.withAlphaComponent(0.55) }

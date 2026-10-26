@@ -1,29 +1,65 @@
+import PDFKit
 import PagecraftCore
 import SwiftUI
 
-/// Floating tool palette shown at the top of the page in Markup mode.
-struct MarkupPalette: View {
+/// The floating tool bar for the active toolset. Each toolset shows only the tools for its task.
+struct ToolsetBar: View {
     @ObservedObject var editor: EditorController
     @State private var showStyle = false
 
     var body: some View {
         HStack(spacing: 2) {
-            group([.select])
-            divider
-            group([.highlight, .underline, .strikeout])
-            divider
-            menuButton(Tool.pens, current: editor.lastPen, label: "Pen")
-            menuButton(Tool.shapes, current: editor.lastShape, label: "Shapes")
-            group([.text, .note])
-            divider
-            signButton
-            stampButton
-            group([.image, .link])
-            measureButton
-            divider
-            group([.redact, .eraser])
-            divider
-            styleButton
+            switch editor.mode {
+            case .annotate:
+                group([.select])
+                divider
+                group([.highlight, .underline, .strikeout])
+                divider
+                group([.text, .note])
+                stampButton
+                group([.image, .link])
+                divider
+                group([.eraser])
+            case .draw:
+                group([.select])
+                divider
+                group([.pen, .marker])
+                divider
+                group([.rectangle, .oval, .line, .arrow, .doubleArrow])
+                group([.polygon, .polyline])
+                divider
+                group([.eraser])
+            case .fillSign:
+                group([.select])
+                divider
+                group([.text, .checkmark, .cross, .date])
+                divider
+                signButton
+                stampButton
+                divider
+                formButton
+            case .measure:
+                group([.select])
+                divider
+                group([.measureDistance, .measurePerimeter, .measureArea])
+                divider
+                scaleButton
+            case .redact:
+                group([.select, .redact])
+                divider
+                redactStyleButton
+                PaletteButton(symbol: "text.magnifyingglass", label: "Find", help: "Find and Redact… (⇧⌘F)", selected: false) {
+                    editor.showFindRedact = true
+                }
+                divider
+                applyRedactionsButton
+            default:
+                EmptyView()
+            }
+            if editor.mode != .redact {
+                divider
+                styleButton
+            }
             divider
             PaletteButton(symbol: "arrow.uturn.backward", label: "Undo", help: "Undo (⌘Z)", selected: false) {
                 editor.undoManager?.undo()
@@ -55,42 +91,11 @@ struct MarkupPalette: View {
             PaletteButton(symbol: tool.symbol, label: tool.label, help: tool.help, selected: editor.tool == tool, tint: tint(tool)) {
                 editor.tool = tool
             }
-            .contextMenu {
-                if tool == .redact {
-                    Picker("Mark Style", selection: $editor.redactionStyle) {
-                        ForEach(Annotations.RedactionStyle.allCases) { Text($0.rawValue).tag($0) }
-                    }
-                    Button("Find and Redact…") { editor.showFindRedact = true }
-                    if editor.hasRedactions { Button("Apply Redactions…") { editor.applyRedactions() } }
-                }
-            }
         }
-    }
-
-    /// A tool family (pens, shapes) behind one button that remembers the last choice.
-    private func menuButton(_ tools: [Tool], current: Tool, label: String) -> some View {
-        let active = tools.contains(editor.tool)
-        let shown = active ? editor.tool : current
-        return Menu {
-            ForEach(tools) { tool in
-                Button { editor.tool = tool } label: { Label(tool.help, systemImage: tool.symbol) }
-            }
-        } label: {
-            PaletteLabel(symbol: shown.symbol, label: label, selected: active, tint: tint(shown), showsChevron: true)
-        } primaryAction: {
-            editor.tool = shown
-        }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("\(label): \(tools.map(\.label).joined(separator: ", "))")
     }
 
     private var signButton: some View {
-        let active = Tool.fillAndSign.contains(editor.tool)
-        let shown = active ? editor.tool : editor.lastFillAndSign
-        return Menu {
+        Menu {
             Section("Signatures") {
                 ForEach(editor.signatureLibrary) { signature in
                     Button {
@@ -103,29 +108,37 @@ struct MarkupPalette: View {
                 }
                 Button("New Signature…") { editor.signaturePadInitials = false; editor.showSignaturePad = true }
                 Button("New Initials…") { editor.signaturePadInitials = true; editor.showSignaturePad = true }
-                if !editor.signatureLibrary.isEmpty {
-                    Menu("Delete") {
-                        ForEach(editor.signatureLibrary) { signature in
-                            Button(signature.isInitials ? "Initials" : "Signature") { editor.deleteSignature(signature) }
-                        }
+            }
+            if !editor.signatureLibrary.isEmpty {
+                Menu("Delete") {
+                    ForEach(editor.signatureLibrary) { signature in
+                        Button(signature.isInitials ? "Initials" : "Signature") { editor.deleteSignature(signature) }
                     }
                 }
             }
-            Section("Fill") {
-                ForEach([Tool.checkmark, .cross, .date]) { tool in
-                    Button { editor.tool = tool } label: { Label(tool.label, systemImage: tool.symbol) }
-                }
-                Button { editor.tool = .text } label: { Label("Text", systemImage: Tool.text.symbol) }
-            }
-            Section("Form Fields") {
-                ForEach(Tool.formFields) { tool in
-                    Button { editor.tool = tool } label: { Label(tool.label, systemImage: tool.symbol) }
-                }
-                Button("Clear Form") { editor.resetForm() }
-            }
         } label: {
-            PaletteLabel(symbol: shown.symbol, label: shown == .signature ? "Sign" : shown.label, selected: active,
-                         tint: shown == .signature ? nil : tint(shown), showsChevron: true)
+            PaletteLabel(symbol: Tool.signature.symbol, label: "Sign", selected: editor.tool == .signature, showsChevron: true)
+        } primaryAction: {
+            editor.tool = .signature
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(editor.signatureLibrary.isEmpty ? "Create a signature" : "Place your signature (G)")
+    }
+
+    private var formButton: some View {
+        let active = Tool.formFields.contains(editor.tool)
+        let shown = active ? editor.tool : .formText
+        return Menu {
+            ForEach(Tool.formFields) { tool in
+                Button { editor.tool = tool } label: { Label(tool.label, systemImage: tool.symbol) }
+            }
+            Divider()
+            Button("Clear Form") { editor.resetForm() }
+        } label: {
+            PaletteLabel(symbol: shown.symbol, label: "Fields", selected: active, showsChevron: true)
         } primaryAction: {
             editor.tool = shown
         }
@@ -133,7 +146,7 @@ struct MarkupPalette: View {
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("Fill & Sign")
+        .help("Add form fields: drag on the page")
     }
 
     private var stampButton: some View {
@@ -161,27 +174,47 @@ struct MarkupPalette: View {
         .help(Tool.stamp.help)
     }
 
-    private var measureButton: some View {
-        let active = Tool.measures.contains(editor.tool)
-        let shown = active ? editor.tool : editor.lastMeasure
-        return Menu {
-            ForEach(Tool.measures) { tool in
-                Button { editor.tool = tool } label: { Label(tool.label, systemImage: tool.symbol) }
+    private var scaleButton: some View {
+        PaletteButton(symbol: "scalemass", label: editor.measureScale.ratio == 1 ? "1:1" : "1:\(editor.measureScale.ratio.formatted())",
+                      help: "Measurement scale and units (\(editor.measureScale.unit.rawValue))", selected: false) {
+            editor.showMeasureScale = true
+        }
+    }
+
+    private var redactStyleButton: some View {
+        Menu {
+            Picker("Mark Style", selection: $editor.redactionStyle) {
+                ForEach(Annotations.RedactionStyle.allCases) { Text($0.rawValue).tag($0) }
             }
-            Divider()
-            Button("Scale: \(editor.measureScale.ratio == 1 ? "1:1" : "1:\(editor.measureScale.ratio.formatted())") in \(editor.measureScale.unit.rawValue)…") {
-                editor.showMeasureScale = true
-            }
+            .pickerStyle(.inline)
         } label: {
-            PaletteLabel(symbol: shown.symbol, label: "Measure", selected: active, showsChevron: true)
-        } primaryAction: {
-            editor.tool = shown
+            PaletteLabel(symbol: editor.redactionStyle == .blackout ? "square.fill" : "square", label: editor.redactionStyle == .blackout ? "Black" : "White",
+                         selected: false, showsChevron: true)
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("Measure distance, perimeter and area. Click points; double-click or Return to finish.")
+        .help("Black box or white-out")
+    }
+
+    private var applyRedactionsButton: some View {
+        let count = editor.redactionCount
+        return Button { editor.applyRedactions() } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark.seal")
+                Text(count == 0 ? "Apply" : "Apply \(count)")
+            }
+            .font(.callout.weight(.semibold))
+            .padding(.horizontal, 12)
+            .frame(height: 30)
+            .background(Capsule().fill(count == 0 ? Color.secondary.opacity(0.2) : Color.red))
+            .foregroundStyle(count == 0 ? Color.secondary : Color.white)
+        }
+        .buttonStyle(.plain)
+        .disabled(count == 0)
+        .padding(.horizontal, 4)
+        .help("Permanently remove everything under the marks")
     }
 
     private var styleButton: some View {
@@ -204,6 +237,47 @@ struct MarkupPalette: View {
             StylePopover(editor: editor)
         }
         .disabled(!(editor.tool.isStyled || editor.selected != nil))
+    }
+}
+
+/// Actions for scanned documents: text recognition and page clean-up.
+struct ScanBar: View {
+    @ObservedObject var editor: EditorController
+
+    var body: some View {
+        HStack(spacing: 2) {
+            PaletteButton(symbol: "text.viewfinder", label: "OCR", help: "Recognize text so scans become searchable", selected: false) {
+                editor.recognizeText()
+            }
+            divider
+            PaletteButton(symbol: "rectangle.dashed", label: "Margins", help: "Clear margins of the current or selected pages", selected: false) {
+                editor.autoCrop()
+            }
+            PaletteButton(symbol: "crop", label: "Crop", help: "Crop pages (C)", selected: editor.tool == .crop) {
+                editor.beginCrop()
+            }
+            PaletteButton(symbol: "arrow.up.left.and.arrow.down.right", label: "Size", help: "Change page size", selected: false) {
+                editor.showPageSize = true
+            }
+            divider
+            PaletteButton(symbol: "rotate.left", label: "Left", help: "Rotate left (⌘L)", selected: false) { editor.rotate(-90) }
+            PaletteButton(symbol: "rotate.right", label: "Right", help: "Rotate right (⌘R)", selected: false) { editor.rotate(90) }
+            divider
+            PaletteButton(symbol: "arrow.uturn.backward", label: "Undo", help: "Undo (⌘Z)", selected: false) {
+                editor.undoManager?.undo()
+            }
+            .disabled(!(editor.undoManager?.canUndo ?? false))
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 5)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.separator.opacity(0.6), lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.14), radius: 14, y: 6)
+        .id(editor.revision)
+    }
+
+    private var divider: some View {
+        Divider().frame(height: 30).padding(.horizontal, 3)
     }
 }
 
