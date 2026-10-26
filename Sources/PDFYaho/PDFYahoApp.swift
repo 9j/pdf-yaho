@@ -17,7 +17,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             self.showWelcomeIfIdle()
         }
-        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: nil, queue: .main) { _ in
+        #if DEBUG
+        WindowQA.run()
+        #endif
+        // Like PDF Expert, Home comes back only when the last document closes. Closing Home itself,
+        // Settings or a panel leaves the app running with no windows; the Dock icon brings Home back.
+        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: nil, queue: .main) { note in
+            guard let window = note.object as? NSWindow,
+                  MainActor.assumeIsolated({ NSDocumentController.shared.document(for: window) != nil }) else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                 MainActor.assumeIsolated { self.showWelcomeIfIdle() }
             }
