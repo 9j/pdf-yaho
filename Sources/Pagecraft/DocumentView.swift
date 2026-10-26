@@ -248,6 +248,21 @@ struct UnlockView: View {
 
 struct PropertiesView: View {
     @ObservedObject var editor: EditorController
+
+    private func attribute(_ key: PDFDocumentAttribute) -> Any? { editor.document.documentAttributes?[key] }
+
+    private var pageSize: String {
+        guard let page = editor.document.page(at: editor.currentPageIndex) else { return "—" }
+        let size = PageOps.displaySize(page)
+        let mm = { (points: CGFloat) in Int((points / 72 * 25.4).rounded()) }
+        let name = PageOps.PaperSize.all.first { abs($0.size.width - min(size.width, size.height)) < 3 && abs($0.size.height - max(size.width, size.height)) < 3 }?.name
+        return "\(mm(size.width)) × \(mm(size.height)) mm" + (name.map { " (\($0))" } ?? "")
+    }
+
+    private var counts: (annotations: Int, fields: Int) {
+        let all = PDFOps.pages(of: editor.document).flatMap(\.annotations)
+        return (all.filter(Annotations.isUserEditable).count, all.filter { $0.type == "Widget" }.count)
+    }
     @Environment(\.dismiss) private var dismiss
     @State private var title = ""
     @State private var author = ""
@@ -264,10 +279,29 @@ struct PropertiesView: View {
                     TextField("Subject", text: $subject)
                     TextField("Keywords", text: $keywords, prompt: Text("Comma separated"))
                 }
-                Section {
+                Section("File") {
                     LabeledContent("Pages", value: "\(editor.pageCount)")
+                    LabeledContent("Page size", value: pageSize)
+                    if let size = editor.currentFileSize {
+                        LabeledContent("File size", value: ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file))
+                    }
                     LabeledContent("PDF version", value: "\(editor.document.majorVersion).\(editor.document.minorVersion)")
+                    if let created = attribute(.creationDateAttribute) as? Date {
+                        LabeledContent("Created", value: created.formatted(date: .abbreviated, time: .shortened))
+                    }
+                    if let modified = attribute(.modificationDateAttribute) as? Date {
+                        LabeledContent("Modified", value: modified.formatted(date: .abbreviated, time: .shortened))
+                    }
+                    if let creator = attribute(.creatorAttribute) as? String, !creator.isEmpty { LabeledContent("Application", value: creator) }
+                    if let producer = attribute(.producerAttribute) as? String, !producer.isEmpty { LabeledContent("PDF producer", value: producer) }
+                }
+                Section("Content and Security") {
+                    LabeledContent("Annotations", value: "\(counts.annotations)")
+                    LabeledContent("Form fields", value: "\(counts.fields)")
+                    LabeledContent("Password to open", value: editor.isPasswordProtected ? "Yes" : "No")
                     LabeledContent("Encrypted", value: editor.document.isEncrypted ? "Yes" : "No")
+                    LabeledContent("Printing", value: editor.document.allowsPrinting ? "Allowed" : "Not allowed")
+                    LabeledContent("Copying text", value: editor.document.allowsCopying ? "Allowed" : "Not allowed")
                 }
             }
             .formStyle(.grouped)
@@ -289,7 +323,7 @@ struct PropertiesView: View {
             }
         }
         .padding(22)
-        .frame(width: 460, height: 470)
+        .frame(width: 480, height: 640)
         .onAppear {
             let attributes = editor.document.documentAttributes ?? [:]
             title = attributes[PDFDocumentAttribute.titleAttribute] as? String ?? ""

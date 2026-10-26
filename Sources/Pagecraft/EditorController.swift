@@ -250,6 +250,31 @@ struct ToolStyle: Equatable {
     var opacity: CGFloat = 1
     var fill: NSColor?
     var dash: Annotations.LineStyle = .solid
+    /// Text boxes only.
+    var fontName: String?
+    var bold = false
+    var italic = false
+    var alignment: NSTextAlignment = .left
+}
+
+/// Font families offered for text boxes; nil means the system font.
+enum TextFonts {
+    static let families: [String?] = [nil, "Helvetica Neue", "Avenir Next", "Georgia", "Times New Roman", "Baskerville",
+                                      "Courier New", "Menlo", "Marker Felt", "Apple SD Gothic Neo", "Hiragino Sans"]
+        .filter { $0 == nil || NSFontManager.shared.availableFontFamilies.contains($0!) }
+
+    static func font(family: String?, size: CGFloat, bold: Bool, italic: Bool) -> NSFont {
+        var font = family.flatMap { NSFont(name: $0, size: size) ?? NSFontManager.shared.font(withFamily: $0, traits: [], weight: 5, size: size) }
+            ?? NSFont.systemFont(ofSize: size)
+        if bold { font = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask) }
+        if italic { font = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask) }
+        return font
+    }
+
+    static func family(of font: NSFont?) -> String? {
+        guard let font, !font.fontName.hasPrefix(".") else { return nil }
+        return font.familyName
+    }
 }
 
 /// What the Stamp tool places.
@@ -750,7 +775,10 @@ final class EditorController: ObservableObject {
     }
 
     var activeFill: NSColor? {
-        if let selected { return selected.annotation.interiorColor }
+        if let selected {
+            if selected.annotation.type == "FreeText" { return selected.annotation.color.alphaComponent > 0.01 ? selected.annotation.color : nil }
+            return selected.annotation.interiorColor
+        }
         return style(for: tool).fill
     }
 
@@ -762,7 +790,47 @@ final class EditorController: ObservableObject {
     private var selectedType: String { selected?.annotation.type ?? "" }
     var widthApplies: Bool { selected.map { _ in ["FreeText", "Ink", "Square", "Circle", "Line"].contains(selectedType) } ?? tool.usesWidth }
     var widthIsFontSize: Bool { selected.map { _ in selectedType == "FreeText" } ?? [.text, .date].contains(tool) }
-    var fillApplies: Bool { selected.map { _ in ["Square", "Circle"].contains(selectedType) } ?? tool.usesFill }
+    var fillApplies: Bool { selected.map { _ in ["Square", "Circle", "FreeText"].contains(selectedType) } ?? (tool.usesFill || tool == .text) }
+    var textApplies: Bool { selected.map { _ in selectedType == "FreeText" } ?? (tool == .text) }
+
+    var activeFontFamily: String? {
+        if let selected { return TextFonts.family(of: selected.annotation.font) }
+        return style(for: .text).fontName
+    }
+
+    var activeBold: Bool {
+        if let selected { return selected.annotation.font.map { NSFontManager.shared.traits(of: $0).contains(.boldFontMask) } ?? false }
+        return style(for: .text).bold
+    }
+
+    var activeItalic: Bool {
+        if let selected { return selected.annotation.font.map { NSFontManager.shared.traits(of: $0).contains(.italicFontMask) } ?? false }
+        return style(for: .text).italic
+    }
+
+    var activeAlignment: NSTextAlignment {
+        selected?.annotation.alignment ?? style(for: .text).alignment
+    }
+
+    func setTextFormat(family: String?? = nil, bold: Bool? = nil, italic: Bool? = nil, alignment: NSTextAlignment? = nil) {
+        let newFamily = family ?? activeFontFamily
+        let newBold = bold ?? activeBold, newItalic = italic ?? activeItalic
+        if let selected, selected.annotation.type == "FreeText" {
+            restyle(selected, name: "Format Text") { a in
+                a.font = TextFonts.font(family: newFamily, size: a.font?.pointSize ?? 14, bold: newBold, italic: newItalic)
+                if let alignment { a.alignment = alignment }
+                self.refit(a)
+            }
+        }
+        if selected == nil || tool == .text {
+            var style = style(for: .text)
+            style.fontName = newFamily
+            style.bold = newBold
+            style.italic = newItalic
+            if let alignment { style.alignment = alignment }
+            styles[.text] = style
+        }
+    }
     var dashApplies: Bool { selected.map { _ in ["Ink", "Square", "Circle", "Line"].contains(selectedType) } ?? tool.usesDash }
     var opacityApplies: Bool {
         if let selected { return !["Highlight", "Underline", "StrikeOut", "Text"].contains(selectedType) && !Annotations.isRedaction(selected.annotation) }
@@ -810,8 +878,12 @@ final class EditorController: ObservableObject {
 
     func setFill(_ fill: NSColor?) {
         let fill = fill.map(Palette.srgb)
-        if let selected { restyle(selected, name: "Change Fill") { Annotations.setFill(fill?.withAlphaComponent(self.activeOpacity), of: $0) } }
-        if tool.usesFill { styles[tool, default: style(for: tool)].fill = fill }
+        if let selected {
+            restyle(selected, name: "Change Fill") { a in
+                if a.type == "FreeText" { a.color = fill ?? .clear } else { Annotations.setFill(fill?.withAlphaComponent(self.activeOpacity), of: a) }
+            }
+        }
+        if tool.usesFill || tool == .text { styles[tool, default: style(for: tool)].fill = fill }
     }
 
     func setDash(_ dash: Annotations.LineStyle) {
@@ -955,7 +1027,11 @@ final class EditorController: ObservableObject {
 
     func commitNewText(_ text: String, at topLeft: CGPoint, on page: PDFPage) {
         let style = style(for: .text)
-        let a = Annotations.freeText(text, at: topLeft, color: style.color, fontSize: style.width)
+        let a = Annotations.freeText(text, at: topLeft, color: style.color.withAlphaComponent(style.opacity), fontSize: style.width)
+        a.font = TextFonts.font(family: style.fontName, size: style.width, bold: style.bold, italic: style.italic)
+        a.alignment = style.alignment
+        if let fill = style.fill { a.color = fill }
+        refit(a)
         add(a, to: page)
         select(SelectedAnnotation(annotation: a, page: page))
     }
@@ -1146,6 +1222,27 @@ final class EditorController: ObservableObject {
             return true
         }
         return false
+    }
+
+    func replaceSelectedImage() {
+        guard let selected, let image = selected.annotation as? ImageAnnotation,
+              let url = Prompt.open([.image], multiple: false, title: "Replace Image").first, let replacement = NSImage(contentsOf: url) else { return }
+        let previous = image.image
+        setImage(replacement, of: image, on: selected.page, previous: previous)
+    }
+
+    private func setImage(_ new: NSImage?, of annotation: ImageAnnotation, on page: PDFPage, previous: NSImage?) {
+        annotation.image = new
+        registerUndo("Replace Image") { $0.setImage(previous, of: annotation, on: page, previous: new) }
+        changed([page])
+    }
+
+    func saveSelectedImage() {
+        guard let image = (selected?.annotation as? ImageAnnotation)?.image,
+              let url = Prompt.save(.png, name: "Image.png", title: "Save Image"),
+              let tiff = image.tiffRepresentation, let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:])
+        else { return }
+        do { try png.write(to: url); showToast("Image saved", url: url) } catch { Prompt.error(error.localizedDescription) }
     }
 
     func reorderSelected(toFront: Bool) {

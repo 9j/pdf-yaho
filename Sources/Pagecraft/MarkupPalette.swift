@@ -358,6 +358,10 @@ struct StylePopover: View {
                     set: { editor.setColor(NSColor($0)) }), supportsOpacity: false)
                     .labelsHidden()
             }
+            if editor.textApplies {
+                Divider()
+                TextFormatControls(editor: editor)
+            }
             if editor.widthApplies {
                 Divider()
                 SliderRow(title: editor.widthIsFontSize ? "Font size" : "Thickness", value: editor.activeWidth,
@@ -376,7 +380,7 @@ struct StylePopover: View {
             }
             if editor.fillApplies {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Fill").foregroundStyle(.secondary)
+                    Text(editor.textApplies ? "Background" : "Fill").foregroundStyle(.secondary)
                     HStack(spacing: 6) {
                         Button { editor.setFill(nil) } label: {
                             Image(systemName: "nosign").frame(width: 22, height: 22)
@@ -395,6 +399,37 @@ struct StylePopover: View {
         }
         .padding(16)
         .frame(width: 270)
+    }
+}
+
+/// Font family, bold/italic and alignment for text boxes.
+private struct TextFormatControls: View {
+    @ObservedObject var editor: EditorController
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Picker("Font", selection: Binding(get: { editor.activeFontFamily ?? "" },
+                                              set: { editor.setTextFormat(family: .some($0.isEmpty ? nil : $0)) })) {
+                ForEach(TextFonts.families, id: \.self) { family in
+                    Text(family ?? "System").font(.custom(family ?? NSFont.systemFont(ofSize: 13).fontName, size: 13)).tag(family ?? "")
+                }
+            }
+            HStack(spacing: 8) {
+                Toggle(isOn: Binding(get: { editor.activeBold }, set: { editor.setTextFormat(bold: $0) })) { Image(systemName: "bold") }
+                    .toggleStyle(.button).help("Bold")
+                Toggle(isOn: Binding(get: { editor.activeItalic }, set: { editor.setTextFormat(italic: $0) })) { Image(systemName: "italic") }
+                    .toggleStyle(.button).help("Italic")
+                Spacer()
+                Picker("Alignment", selection: Binding(get: { editor.activeAlignment.rawValue }, set: { editor.setTextFormat(alignment: NSTextAlignment(rawValue: $0)) })) {
+                    Image(systemName: "text.alignleft").tag(NSTextAlignment.left.rawValue)
+                    Image(systemName: "text.aligncenter").tag(NSTextAlignment.center.rawValue)
+                    Image(systemName: "text.alignright").tag(NSTextAlignment.right.rawValue)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 110)
+            }
+        }
     }
 }
 

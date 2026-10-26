@@ -178,7 +178,15 @@ struct AnnotationContextBar: View {
                     Text(a.url?.absoluteString ?? a.destination?.page.map { "Page \(editor.document.index(for: $0) + 1)" } ?? "Link")
                         .lineLimit(1).font(.callout).foregroundStyle(.secondary).frame(maxWidth: 220).padding(.horizontal, 6)
                 }
+                if a is ImageAnnotation {
+                    BarButton(symbol: "photo.on.rectangle", label: "Replace Image…") { editor.replaceSelectedImage() }
+                }
                 Menu {
+                    if a is ImageAnnotation {
+                        Button("Replace Image…") { editor.replaceSelectedImage() }
+                        Button("Save Image…") { editor.saveSelectedImage() }
+                        Divider()
+                    }
                     Button("Copy") { editor.copySelectedAnnotation() }
                     Button("Cut") { editor.copySelectedAnnotation(cut: true) }
                     Divider()

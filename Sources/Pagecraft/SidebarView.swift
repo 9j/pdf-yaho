@@ -59,6 +59,11 @@ struct ThumbnailList: View {
                                 .padding(4)
                                 .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
                                     .strokeBorder(current ? Color.accentColor : .clear, lineWidth: 2.5))
+                                .overlay(alignment: .topTrailing) {
+                                    if editor.isBookmarked(index) {
+                                        Image(systemName: "bookmark.fill").font(.system(size: 12)).foregroundStyle(.red).padding(.trailing, 10)
+                                    }
+                                }
                         }
                         Text("\(index + 1)")
                             .font(.caption.weight(current ? .semibold : .regular))

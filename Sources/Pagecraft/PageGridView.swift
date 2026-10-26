@@ -107,6 +107,10 @@ private struct PageCell: View {
                                               style: StrokeStyle(lineWidth: 3, dash: dropTarget && !selected ? [6, 4] : []))
                         )
                 }
+                if editor.isBookmarked(index) {
+                    Image(systemName: "bookmark.fill").font(.system(size: 16)).foregroundStyle(.red)
+                        .padding(.trailing, selected ? 26 : 14)
+                }
                 if selected {
                     Image(systemName: "checkmark.circle.fill")
                         .symbolRenderingMode(.palette)
