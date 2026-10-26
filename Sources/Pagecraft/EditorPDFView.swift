@@ -85,7 +85,7 @@ final class EditorPDFView: PDFView {
         if loc.y < 70 { editor.pokeHUD() }
         if resizeAnchor(at: loc) != nil { NSCursor.crosshair.set(); return }
         switch editor.tool {
-        case .select, .highlight, .underline, .strikeout:
+        case .select, .highlight, .underline, .squiggly, .strikeout:
             if let (page, point, _) = pagePoint(event), editor.tool == .select, let a = hit(point, on: page), Annotations.isMovable(a) {
                 NSCursor.openHand.set()
                 return
@@ -121,7 +121,7 @@ final class EditorPDFView: PDFView {
             }
             editor.select(nil)
             super.mouseDown(with: event)
-        case .highlight, .underline, .strikeout:
+        case .highlight, .underline, .squiggly, .strikeout:
             editor.select(nil)
             super.mouseDown(with: event)
         case .text:
@@ -143,11 +143,11 @@ final class EditorPDFView: PDFView {
             editor.placeStamp(at: point, on: page)
         case .eraser:
             if let a = hit(point, on: page) { editor.erase(a, on: page) }
-        case .polygon, .polyline, .measurePerimeter, .measureArea:
+        case .polygon, .polyline, .cloudPolygon, .measurePerimeter, .measureArea:
             editor.select(nil)
             addPoint(point, on: page, finish: event.clickCount >= 2)
         case .pen, .marker, .rectangle, .oval, .line, .arrow, .doubleArrow, .redact, .link, .image, .snapshot,
-             .formText, .formCheckbox, .formRadio, .formChoice, .measureDistance:
+             .formText, .formCheckbox, .formRadio, .formChoice, .measureDistance, .callout, .cloud:
             editor.select(nil)
             drag = .draw(page: page, start: point, stroke: [point])
         case .crop:
@@ -211,7 +211,8 @@ final class EditorPDFView: PDFView {
                               width: abs(point.x - start.x), height: abs(point.y - start.y)).intersection(media)
             editor.cropDraft = (page, rect)
         case let .draw(page, start, stroke):
-            guard let (_, point, _) = pagePoint(event, page: page) else { return }
+            guard let (_, raw, _) = pagePoint(event, page: page) else { return }
+            let point = constrained(raw, from: start, event: event)
             self.drag = .draw(page: page, start: start, stroke: stroke + [point])
             showPreview(makeAnnotation(editor, from: start, to: point, stroke: stroke + [point]), on: page)
         }
@@ -232,7 +233,8 @@ final class EditorPDFView: PDFView {
             break
         case let .draw(page, start, stroke):
             showPreview(nil, on: nil)
-            guard let (_, point, _) = pagePoint(event, page: page) else { return }
+            guard let (_, raw, _) = pagePoint(event, page: page) else { return }
+            let point = constrained(raw, from: start, event: event)
             let large = abs(point.x - start.x) > 3 || abs(point.y - start.y) > 3
             let rect = CGRect(x: min(start.x, point.x), y: min(start.y, point.y), width: abs(point.x - start.x), height: abs(point.y - start.y))
             switch editor.tool {
@@ -244,6 +246,15 @@ final class EditorPDFView: PDFView {
                 if large { editor.snapshot(rect, on: page) }
             case .measureDistance:
                 if large { editor.commitDistance(from: start, to: point, on: page) }
+            case .callout:
+                // Drag from what the callout points at to where its text goes.
+                let boxCorner = large ? point : CGPoint(x: start.x + 40, y: start.y + 50)
+                DispatchQueue.main.async { self.beginNewCallout(anchor: start, boxTopLeft: boxCorner, on: page) }
+            case .cloud:
+                if large {
+                    let style = editor.style(for: .cloud)
+                    editor.add(Annotations.cloud(rect: rect, color: editor.strokeColor(for: .cloud), lineWidth: style.width, fill: style.fill), to: page)
+                }
             case .formText, .formCheckbox, .formRadio, .formChoice:
                 if let kind = editor.tool.formKind { editor.addFormField(kind, in: large ? rect : CGRect(origin: point, size: .zero), on: page) }
             default:
@@ -282,8 +293,11 @@ final class EditorPDFView: PDFView {
             a.border = border
             a.interiorColor = NSColor.controlAccentColor.withAlphaComponent(0.08)
             return a
-        case .measureDistance:
-            return Annotations.shape(.line, from: start, to: point, color: editor.strokeColor(for: tool), lineWidth: style.width)
+        case .measureDistance, .callout:
+            return Annotations.shape(tool == .callout ? .arrow : .line, from: tool == .callout ? point : start, to: tool == .callout ? start : point,
+                                     color: editor.strokeColor(for: tool), lineWidth: tool == .callout ? 1.5 : style.width)
+        case .cloud:
+            return Annotations.cloud(rect: rect, color: editor.strokeColor(for: tool), lineWidth: style.width, fill: style.fill)
         default:
             guard let shape = tool.shape else { return nil }
             let a = Annotations.shape(shape, from: start, to: point, color: editor.strokeColor(for: tool), lineWidth: style.width)
@@ -291,6 +305,12 @@ final class EditorPDFView: PDFView {
             if tool.usesFill, let fill = style.fill { a.interiorColor = fill.withAlphaComponent(style.opacity) }
             return a
         }
+    }
+
+    /// Shift keeps lines at 45° steps and boxes square.
+    private func constrained(_ point: CGPoint, from start: CGPoint, event: NSEvent) -> CGPoint {
+        guard event.modifierFlags.contains(.shift), let kind = editor?.tool.constraint else { return point }
+        return Geometry.constrained(from: start, to: point, kind: kind)
     }
 
     private func showPreview(_ annotation: PDFAnnotation?, on page: PDFPage?) {
@@ -378,6 +398,15 @@ final class EditorPDFView: PDFView {
         }
     }
 
+    func beginNewCallout(anchor: CGPoint, boxTopLeft: CGPoint, on page: PDFPage) {
+        guard let editor else { return }
+        let style = editor.style(for: .callout)
+        startInline(kind: .text, page: page, anchor: boxTopLeft, text: "", fontSize: style.width, color: style.color) { [weak self] text in
+            guard let self, let editor = self.editor, !text.isEmpty else { return }
+            editor.commitCallout(text, anchor: anchor, boxTopLeft: boxTopLeft, on: page)
+        }
+    }
+
     func beginNewNote(at point: CGPoint, on page: PDFPage) {
         startInline(kind: .note, page: page, anchor: point, text: "", fontSize: 12, color: .black) { [weak self] text in
             guard let self, let editor = self.editor, !text.isEmpty else { return }
@@ -386,6 +415,19 @@ final class EditorPDFView: PDFView {
     }
 
     func beginEditing(_ annotation: PDFAnnotation, on page: PDFPage) {
+        if let callout = annotation as? CalloutAnnotation {
+            callout.shouldDisplay = false
+            annotationsChanged(on: page)
+            startInline(kind: .text, page: page, anchor: CGPoint(x: callout.box.minX + 4, y: callout.box.maxY - 3), text: callout.text,
+                        fontSize: callout.fontSize, color: callout.color) { [weak self] text in
+                guard let self, let editor = self.editor else { return }
+                callout.shouldDisplay = true
+                self.annotationsChanged(on: page)
+                if text.isEmpty { editor.remove(callout, from: page) }
+                else if text != callout.text { editor.setCalloutText(text, of: callout, on: page) }
+            }
+            return
+        }
         let isText = annotation.type == "FreeText"
         let anchor = isText ? CGPoint(x: annotation.bounds.minX, y: annotation.bounds.maxY) : CGPoint(x: annotation.bounds.midX, y: annotation.bounds.midY)
         if isText { annotation.shouldDisplay = false; annotationsChanged(on: page) }

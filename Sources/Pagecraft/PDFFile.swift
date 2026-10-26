@@ -22,6 +22,8 @@ final class PDFFile: ReferenceFileDocument {
             throw CocoaError(.fileReadCorruptFile)
         }
         pdf = doc
+        // Callouts and clouds come back from disk as plain stamps; make them editable again.
+        for page in PDFOps.pages(of: doc) { Annotations.restoreCustomAnnotations(on: page) }
     }
 
     func snapshot(contentType: UTType) throws -> Data {

@@ -42,6 +42,15 @@ struct PageGridView: View {
             PagesActionBar(editor: editor, size: $size).padding(.bottom, 18)
         }
         .onDeleteCommand { editor.deletePages() }
+        .onCopyCommand {
+            editor.copyPages()
+            return []
+        }
+        .onCutCommand {
+            editor.cutPages()
+            return []
+        }
+        .onPasteCommand(of: [.pdf, .image]) { _ in editor.insertFromClipboard() }
     }
 
     private func dragIndices(for index: Int) -> [Int] {
@@ -182,6 +191,8 @@ private struct PagesActionBar: View {
                     Button("From Clipboard") { editor.insertFromClipboard() }
                 }
                 Button("Duplicate") { editor.duplicatePages() }.disabled(count == 0)
+                Button("Copy Pages") { editor.copyPages() }.disabled(count == 0)
+                Button("Paste Pages") { editor.insertFromClipboard() }
                 Button("Reverse Order") { editor.reversePages() }
                 Divider()
                 Button("Crop…") { editor.beginCrop() }
@@ -247,6 +258,8 @@ struct PageMenu: View {
         Button("Rotate Right") { editor.rotate(90, pages: indices) }
         Divider()
         Button("Insert Blank Page After") { editor.insertBlankPage(after: index) }
+        Button("Copy") { editor.selectedPages = Set(indices); editor.copyPages() }
+        Button("Paste After") { editor.selectedPages = [index]; editor.insertFromClipboard() }
         Button("Extract…") { Exporter.extract(editor, indices: indices) }
         Button("Add Bookmark") { editor.addBookmark(page: index) }
         Divider()

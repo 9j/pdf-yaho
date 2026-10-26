@@ -83,6 +83,8 @@ struct DocumentView: View {
                 // Lets automated screenshots start in a given toolset without input events.
                 if let raw = ProcessInfo.processInfo.environment["PAGECRAFT_QA_MODE"], let mode = EditorMode(rawValue: raw) { editor.mode = mode }
                 if ProcessInfo.processInfo.environment["PAGECRAFT_QA_SPLIT"] != nil { editor.openSplit() }
+                if ProcessInfo.processInfo.environment["PAGECRAFT_QA_DEMO"] != nil { editor.placeQADemo() }
+                if let raw = ProcessInfo.processInfo.environment["PAGECRAFT_QA_SIDEBAR"], let tab = SidebarTab(rawValue: raw) { editor.sidebarTab = tab }
                 #endif
             }
         }

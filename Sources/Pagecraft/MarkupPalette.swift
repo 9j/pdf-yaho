@@ -13,9 +13,9 @@ struct ToolsetBar: View {
             case .annotate:
                 group([.select])
                 divider
-                group([.highlight, .underline, .strikeout])
+                group([.highlight, .underline, .squiggly, .strikeout])
                 divider
-                group([.text, .note])
+                group([.text, .note, .callout])
                 stampButton
                 group([.image, .link])
                 divider
@@ -27,6 +27,7 @@ struct ToolsetBar: View {
                 divider
                 group([.rectangle, .oval, .line, .arrow, .doubleArrow])
                 group([.polygon, .polyline])
+                group([.cloud, .cloudPolygon])
                 divider
                 group([.eraser])
             case .fillSign:
@@ -250,6 +251,18 @@ struct ScanBar: View {
                 editor.recognizeText()
             }
             divider
+            Menu {
+                ForEach(EnhanceMode.allCases) { mode in
+                    Button(mode.rawValue) { editor.enhancePages(mode) }
+                }
+                Divider()
+                Button("All Pages: Black & White") { editor.enhancePages(.blackAndWhite, Array(0..<editor.pageCount)) }
+                Button("All Pages: Color") { editor.enhancePages(.color, Array(0..<editor.pageCount)) }
+            } label: {
+                PaletteLabel(symbol: "wand.and.stars", label: "Enhance", selected: false, showsChevron: true)
+            }
+            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+            .help("Clean up scanned pages: whiter paper, crisper text")
             PaletteButton(symbol: "rectangle.dashed", label: "Margins", help: "Clear margins of the current or selected pages", selected: false) {
                 editor.autoCrop()
             }
@@ -258,6 +271,9 @@ struct ScanBar: View {
             }
             PaletteButton(symbol: "arrow.up.left.and.arrow.down.right", label: "Size", help: "Change page size", selected: false) {
                 editor.showPageSize = true
+            }
+            PaletteButton(symbol: "rectangle.split.2x1", label: "Split", help: "Split two-page scans (book spreads) into single pages", selected: false) {
+                editor.splitSpreads()
             }
             divider
             PaletteButton(symbol: "rotate.left", label: "Left", help: "Rotate left (⌘L)", selected: false) { editor.rotate(-90) }
@@ -373,10 +389,19 @@ struct StylePopover: View {
                 }
             }
             if editor.dashApplies {
-                Picker("Line", selection: Binding(get: { editor.activeDash }, set: { editor.setDash($0) })) {
+                Picker("Line style", selection: Binding(get: { editor.activeDash }, set: { editor.setDash($0) })) {
                     ForEach(Annotations.LineStyle.allCases) { Text($0.rawValue).tag($0) }
                 }
-                .pickerStyle(.segmented)
+            }
+            if editor.endingsApply {
+                HStack {
+                    Picker("Start", selection: Binding(get: { editor.activeEndings.start.rawValue }, set: { editor.setLineEndings(start: PDFLineStyle(rawValue: $0)) })) {
+                        ForEach(Annotations.supportedLineEndings, id: \.style.rawValue) { Label($0.displayName, systemImage: $0.symbolName).tag($0.style.rawValue) }
+                    }
+                    Picker("End", selection: Binding(get: { editor.activeEndings.end.rawValue }, set: { editor.setLineEndings(end: PDFLineStyle(rawValue: $0)) })) {
+                        ForEach(Annotations.supportedLineEndings, id: \.style.rawValue) { Label($0.displayName, systemImage: $0.symbolName).tag($0.style.rawValue) }
+                    }
+                }
             }
             if editor.fillApplies {
                 VStack(alignment: .leading, spacing: 6) {

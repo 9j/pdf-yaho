@@ -1,4 +1,5 @@
 import PDFKit
+import PagecraftCore
 import SwiftUI
 
 @MainActor
@@ -193,6 +194,8 @@ struct PagecraftCommands: Commands {
                 Button("From Clipboard") { editor?.insertFromClipboard() }
             }
             Button("Duplicate") { editor?.duplicatePages() }
+            Button("Copy Pages") { editor?.copyPages() }
+            Button("Paste Pages") { editor?.insertFromClipboard() }
             Button("Delete") { editor?.deletePages() }.keyboardShortcut(.delete, modifiers: [.command])
             Divider()
             Button("Rotate Left") { editor?.rotate(-90) }.keyboardShortcut("l")
@@ -201,6 +204,10 @@ struct PagecraftCommands: Commands {
             Divider()
             Button("Crop…") { editor?.beginCrop() }.keyboardShortcut("k", modifiers: [.command, .shift])
             Button("Clear Margins") { editor?.autoCrop() }
+            Menu("Enhance Scan") {
+                ForEach(EnhanceMode.allCases) { mode in Button(mode.rawValue) { editor?.enhancePages(mode) } }
+            }
+            Button("Split Book Spreads") { editor?.splitSpreads() }
             Button("Reset Crop") { editor?.resetCrop() }
             Button("Page Size…") { editor?.showPageSize = true }
             Divider()

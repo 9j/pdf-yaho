@@ -53,8 +53,8 @@ enum EditorMode: String, CaseIterable, Identifiable {
 
     var tools: [Tool] {
         switch self {
-        case .annotate: [.select, .highlight, .underline, .strikeout, .text, .note, .stamp, .image, .link, .eraser]
-        case .draw: [.select, .pen, .marker, .rectangle, .oval, .line, .arrow, .doubleArrow, .polygon, .polyline, .eraser]
+        case .annotate: [.select, .highlight, .underline, .squiggly, .strikeout, .text, .note, .callout, .stamp, .image, .link, .eraser]
+        case .draw: [.select, .pen, .marker, .rectangle, .oval, .line, .arrow, .doubleArrow, .polygon, .polyline, .cloud, .cloudPolygon, .eraser]
         case .fillSign: [.select, .text, .checkmark, .cross, .date, .signature, .stamp, .formText, .formCheckbox, .formRadio, .formChoice, .eraser]
         case .measure: [.select, .measureDistance, .measurePerimeter, .measureArea, .eraser]
         case .redact: [.select, .redact, .eraser]
@@ -80,8 +80,8 @@ enum EditorMode: String, CaseIterable, Identifiable {
 }
 
 enum Tool: String, CaseIterable, Identifiable {
-    case select, highlight, underline, strikeout, pen, marker, text, note
-    case rectangle, oval, line, arrow, doubleArrow, polygon, polyline
+    case select, highlight, underline, squiggly, strikeout, pen, marker, text, note, callout
+    case rectangle, oval, line, arrow, doubleArrow, polygon, polyline, cloud, cloudPolygon
     case signature, checkmark, cross, date, stamp, image, link
     case formText, formCheckbox, formRadio, formChoice
     case measureDistance, measurePerimeter, measureArea
@@ -94,11 +94,15 @@ enum Tool: String, CaseIterable, Identifiable {
         case .select: "Select"
         case .highlight: "Highlight"
         case .underline: "Underline"
+        case .squiggly: "Squiggly"
         case .strikeout: "Strike"
         case .pen: "Pen"
         case .marker: "Marker"
         case .text: "Text"
         case .note: "Note"
+        case .callout: "Callout"
+        case .cloud: "Cloud"
+        case .cloudPolygon: "Cloud Polygon"
         case .rectangle: "Rectangle"
         case .oval: "Oval"
         case .line: "Line"
@@ -142,11 +146,15 @@ enum Tool: String, CaseIterable, Identifiable {
         case .select: "cursorarrow"
         case .highlight: "highlighter"
         case .underline: "underline"
+        case .squiggly: "scribble"
         case .strikeout: "strikethrough"
         case .pen: "pencil.tip"
         case .marker: "paintbrush.pointed"
-        case .text: "textformat"
+        case .text: "t.square"
         case .note: "note.text"
+        case .callout: "text.bubble"
+        case .cloud: "cloud"
+        case .cloudPolygon: "cloud.fill"
         case .rectangle: "rectangle"
         case .oval: "circle"
         case .line: "line.diagonal"
@@ -207,6 +215,7 @@ enum Tool: String, CaseIterable, Identifiable {
         switch self {
         case .highlight: .highlight
         case .underline: .underline
+        case .squiggly: SquigglyAnnotation.subtype
         case .strikeout: .strikeOut
         default: nil
         }
@@ -223,21 +232,29 @@ enum Tool: String, CaseIterable, Identifiable {
         }
     }
 
-    static let shapes: [Tool] = [.rectangle, .oval, .line, .arrow, .doubleArrow, .polygon, .polyline]
+    static let shapes: [Tool] = [.rectangle, .oval, .line, .arrow, .doubleArrow, .polygon, .polyline, .cloud, .cloudPolygon]
     static let pens: [Tool] = [.pen, .marker]
     static let fillAndSign: [Tool] = [.signature, .checkmark, .cross, .date, .formText, .formCheckbox, .formRadio, .formChoice]
     static let formFields: [Tool] = [.formText, .formCheckbox, .formRadio, .formChoice]
     static let measures: [Tool] = [.measureDistance, .measurePerimeter, .measureArea]
 
     var isShapeTool: Bool { Tool.shapes.contains(self) }
-    var isPointTool: Bool { [.polygon, .polyline, .measurePerimeter, .measureArea].contains(self) }
-    var closesShape: Bool { self == .polygon || self == .measureArea }
+    var isPointTool: Bool { [.polygon, .polyline, .cloudPolygon, .measurePerimeter, .measureArea].contains(self) }
+    var closesShape: Bool { self == .polygon || self == .measureArea || self == .cloudPolygon }
+    /// Line-like tools snap to 45° with Shift; box-like ones become squares.
+    var constraint: Geometry.ConstraintKind? {
+        switch self {
+        case .line, .arrow, .doubleArrow, .measureDistance, .callout: .line
+        case .rectangle, .oval, .cloud: .box
+        default: nil
+        }
+    }
     /// Tools that drag out a rectangle or stroke.
-    var drags: Bool { self == .pen || self == .marker || shape != nil || formKind != nil || [.redact, .crop, .snapshot, .link, .image, .measureDistance].contains(self) }
+    var drags: Bool { self == .pen || self == .marker || shape != nil || formKind != nil || [.redact, .crop, .snapshot, .link, .image, .measureDistance, .callout, .cloud].contains(self) }
     /// Tools whose look the user can tune with the style controls.
-    var isStyled: Bool { [.highlight, .underline, .strikeout, .pen, .marker, .text, .note, .checkmark, .cross, .date].contains(self) || isShapeTool || Tool.measures.contains(self) }
-    var usesWidth: Bool { [.pen, .marker, .text, .date].contains(self) || isShapeTool || Tool.measures.contains(self) }
-    var usesFill: Bool { self == .rectangle || self == .oval || self == .polygon }
+    var isStyled: Bool { [.highlight, .underline, .squiggly, .strikeout, .pen, .marker, .text, .note, .callout, .checkmark, .cross, .date].contains(self) || isShapeTool || Tool.measures.contains(self) }
+    var usesWidth: Bool { [.pen, .marker, .text, .date, .callout].contains(self) || isShapeTool || Tool.measures.contains(self) }
+    var usesFill: Bool { [.rectangle, .oval, .polygon, .cloud, .cloudPolygon].contains(self) }
     var usesDash: Bool { isShapeTool }
     /// Tools that are part of document editing rather than annotation.
     var isUtility: Bool { [.select, .crop, .snapshot].contains(self) }
@@ -358,6 +375,8 @@ final class EditorController: ObservableObject {
             .highlight: ToolStyle(color: Palette.swatches[4], width: 0),
             .underline: ToolStyle(color: Palette.swatches[7], width: 0),
             .strikeout: ToolStyle(color: Palette.swatches[2], width: 0),
+            .squiggly: ToolStyle(color: Palette.swatches[2], width: 0),
+            .callout: ToolStyle(color: Palette.swatches[2], width: 12),
             .pen: ToolStyle(color: Palette.swatches[7], width: 2),
             .marker: ToolStyle(color: Palette.swatches[4], width: 14, opacity: 0.45),
             .text: ToolStyle(color: Palette.swatches[0], width: 14),
@@ -471,6 +490,8 @@ final class EditorController: ObservableObject {
 
     func attach(_ view: EditorPDFView) {
         pdfView = view
+        historyArmed = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.historyArmed = true }
         view.editor = self
         view.document = document
         applyLayout()
@@ -535,7 +556,11 @@ final class EditorController: ObservableObject {
 
     private var historyFrom: Int?
 
+    /// History changes while the view first positions itself are not user jumps.
+    private var historyArmed = false
+
     private func historyChanged() {
+        guard historyArmed else { return }
         // The page we were on before the jump; currentPageIndex has not been synced yet.
         let from = currentPageIndex
         DispatchQueue.main.async { [weak self] in
@@ -894,13 +919,30 @@ final class EditorController: ObservableObject {
     /// Everything the style controls can change, captured for undo.
     private struct StyleSnapshot {
         let color: NSColor, fontColor: NSColor?, font: NSFont?, interior: NSColor?, border: PDFBorder?, bounds: CGRect
+        let start: PDFLineStyle, end: PDFLineStyle, alignment: NSTextAlignment
         init(_ a: PDFAnnotation) {
             color = a.color; fontColor = a.fontColor; font = a.font; interior = a.interiorColor; bounds = a.bounds
             border = a.border?.copy() as? PDFBorder
+            start = a.startLineStyle; end = a.endLineStyle; alignment = a.alignment
         }
         func apply(to a: PDFAnnotation) {
             a.color = color; a.fontColor = fontColor; a.font = font; a.interiorColor = interior; a.border = border; a.bounds = bounds
+            if a.type == "Line" { a.startLineStyle = start; a.endLineStyle = end }
+            if a.type == "FreeText" { a.alignment = alignment }
         }
+    }
+
+    var endingsApply: Bool { selectedType == "Line" }
+
+    var activeEndings: (start: PDFLineStyle, end: PDFLineStyle) {
+        guard let a = selected?.annotation else { return (.none, .none) }
+        return (a.startLineStyle, a.endLineStyle)
+    }
+
+    func setLineEndings(start: PDFLineStyle? = nil, end: PDFLineStyle? = nil) {
+        guard let selected, selected.annotation.type == "Line" else { return }
+        let current = activeEndings
+        restyle(selected, name: "Line Endings") { Annotations.setLineEndings(start: start ?? current.start, end: end ?? current.end, of: $0) }
     }
 
     private func restyle(_ target: SelectedAnnotation, name: String, _ change: (PDFAnnotation) -> Void) {
@@ -934,10 +976,13 @@ final class EditorController: ObservableObject {
             for page in line.pages {
                 let bounds = line.bounds(for: page)
                 guard bounds.width > 0.5, bounds.height > 0.5 else { continue }
-                add(Annotations.markup(type, bounds: bounds, color: color), to: page)
+                let a = type == SquigglyAnnotation.subtype
+                    ? Annotations.squiggly(bounds: bounds, color: color)
+                    : Annotations.markup(type, bounds: bounds, color: color)
+                add(a, to: page)
             }
         }
-        undoManager?.setActionName(type == .highlight ? "Highlight" : type == .underline ? "Underline" : "Strikeout")
+        undoManager?.setActionName(type == .highlight ? "Highlight" : type == .underline ? "Underline" : type == .strikeOut ? "Strikeout" : "Squiggly")
         pdfView?.clearSelection()
         textSelectionActive = false
     }
@@ -1136,7 +1181,10 @@ final class EditorController: ObservableObject {
 
     func commitPolyline(_ points: [CGPoint], closed: Bool, on page: PDFPage) {
         let style = style(for: tool)
-        guard let a = Annotations.polyline(points, closed: closed, color: strokeColor(for: tool), lineWidth: style.width) else { return }
+        let made = tool == .cloudPolygon
+            ? Annotations.cloudPolygon(points: points, color: strokeColor(for: tool), lineWidth: style.width, fill: style.fill)
+            : Annotations.polyline(points, closed: closed, color: strokeColor(for: tool), lineWidth: style.width)
+        guard let a = made else { return }
         Annotations.setLineStyle(style.dash, of: a)
         if tool == .polygon, let fill = style.fill { a.interiorColor = fill }
         add(a, to: page)
@@ -1224,6 +1272,59 @@ final class EditorController: ObservableObject {
         return false
     }
 
+    func commitCallout(_ text: String, anchor: CGPoint, boxTopLeft: CGPoint, on page: PDFPage) {
+        let style = style(for: .callout)
+        let font = NSFont.systemFont(ofSize: style.width)
+        let size = (text as NSString).boundingRect(with: CGSize(width: 220, height: 10_000), options: [.usesLineFragmentOrigin],
+                                                   attributes: [.font: font]).size
+        let box = CGRect(x: boxTopLeft.x, y: boxTopLeft.y - ceil(size.height) - 14, width: max(ceil(size.width) + 18, 60), height: ceil(size.height) + 14)
+        let a = CalloutAnnotation.make(text: text, box: box, anchor: anchor, color: strokeColor(for: .callout), fontSize: style.width)
+        add(a, to: page)
+        select(SelectedAnnotation(annotation: a, page: page))
+    }
+
+    func setCalloutText(_ text: String, of callout: CalloutAnnotation, on page: PDFPage) {
+        let previous = callout.text
+        callout.text = text
+        registerUndo("Edit Callout") { $0.setCalloutText(previous, of: callout, on: page) }
+        changed([page])
+    }
+
+    // MARK: Page clipboard and scan clean-up
+
+    func copyPages() {
+        let pages = targetPageIndices.compactMap { document.page(at: $0) }
+        guard PDFOps.writePages(pages, to: .general) else { return }
+        showToast("Copied \(pages.count) \(pages.count == 1 ? "page" : "pages")")
+    }
+
+    func cutPages() {
+        copyPages()
+        deletePages()
+    }
+
+    func enhancePages(_ mode: EnhanceMode, _ indices: [Int]? = nil) {
+        let targets = Set(indices ?? targetPageIndices)
+        busy = "Enhancing \(targets.count) \(targets.count == 1 ? "page" : "pages")…"
+        DispatchQueue.main.async { [self] in
+            let pages = PDFOps.pages(of: document).enumerated().map { index, page in
+                targets.contains(index) ? (PageOps.enhanced(page, mode: mode) ?? page) : page
+            }
+            busy = nil
+            setPages(pages, actionName: "Enhance Scan")
+            showToast("Enhanced \(targets.count) \(targets.count == 1 ? "page" : "pages") — run OCR to make them searchable again")
+        }
+    }
+
+    func splitSpreads(_ indices: [Int]? = nil) {
+        let targets = Set(indices ?? (selectedPages.count > 1 ? targetPageIndices : Array(0..<pageCount)))
+        let pages = PDFOps.pages(of: document).enumerated().flatMap { index, page in
+            targets.contains(index) ? PageOps.splitSpread(page) : [page]
+        }
+        setPages(pages, actionName: "Split Pages")
+        showToast("Split \(targets.count) \(targets.count == 1 ? "spread" : "spreads") into \(targets.count * 2) pages")
+    }
+
     func replaceSelectedImage() {
         guard let selected, let image = selected.annotation as? ImageAnnotation,
               let url = Prompt.open([.image], multiple: false, title: "Replace Image").first, let replacement = NSImage(contentsOf: url) else { return }
@@ -1258,7 +1359,7 @@ final class EditorController: ObservableObject {
     }
 
     func beginEditingSelected() {
-        guard let selected, ["FreeText", "Text"].contains(selected.annotation.type ?? "") else { return }
+        guard let selected, ["FreeText", "Text"].contains(selected.annotation.type ?? "") || selected.annotation is CalloutAnnotation else { return }
         pdfView?.beginEditing(selected.annotation, on: selected.page)
     }
 

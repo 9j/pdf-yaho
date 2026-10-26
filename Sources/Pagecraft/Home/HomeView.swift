@@ -72,14 +72,14 @@ private struct HomePageView: View {
 
             VStack(alignment: .leading, spacing: 12) {
                 SectionHeader(title: "Tools for You") { page = .tools }
-                ScrollView(.horizontal) {
+                ArrowScrollRow(count: HomeTools.featured.count) {
                     HStack(spacing: 12) {
-                        ForEach(HomeTools.featured) { ToolCard(tool: $0, style: .compact) }
+                        ForEach(Array(HomeTools.featured.enumerated()), id: \.offset) { index, tool in
+                            ToolCard(tool: tool, style: .compact).id(index)
+                        }
                     }
                     .padding(.vertical, 8)
                 }
-                .scrollIndicators(.hidden)
-                .scrollClipDisabled()
             }
 
             documentRow(title: "Recent", urls: Array(store.recents.prefix(12)), target: .recents,
@@ -98,16 +98,14 @@ private struct HomePageView: View {
             if urls.isEmpty {
                 empty
             } else {
-                ScrollView(.horizontal) {
+                ArrowScrollRow(count: urls.count) {
                     LazyHStack(alignment: .top, spacing: 16) {
-                        ForEach(urls, id: \.self) { url in
-                            DocumentCard(url: url).frame(width: rowCardWidth)
+                        ForEach(Array(urls.enumerated()), id: \.element) { index, url in
+                            DocumentCard(url: url).frame(width: rowCardWidth).id(index)
                         }
                     }
                     .padding(.vertical, 8)
                 }
-                .scrollIndicators(.hidden)
-                .scrollClipDisabled()
             }
         }
     }
@@ -209,5 +207,49 @@ private struct ToolsPageView: View {
                 }
             }
         }
+    }
+}
+
+
+/// A horizontal row without a scroll bar, with previous/next arrows that appear on hover.
+struct ArrowScrollRow<Content: View>: View {
+    let count: Int
+    @ViewBuilder let content: Content
+    @State private var hovering = false
+    @State private var index = 0
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal) { content }
+                .scrollIndicators(.never)
+                .scrollClipDisabled()
+                .overlay(alignment: .leading) {
+                    arrow("chevron.left", visible: hovering && index > 0) { step(-3, proxy) }.offset(x: -14)
+                }
+                .overlay(alignment: .trailing) {
+                    arrow("chevron.right", visible: hovering && index < count - 1) { step(3, proxy) }.offset(x: 14)
+                }
+                .onHover { hovering = $0 }
+        }
+    }
+
+    private func step(_ delta: Int, _ proxy: ScrollViewProxy) {
+        index = max(0, min(count - 1, index + delta))
+        withAnimation(.snappy) { proxy.scrollTo(index, anchor: .leading) }
+    }
+
+    private func arrow(_ symbol: String, visible: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 13, weight: .semibold))
+                .frame(width: 30, height: 30)
+                .background(.regularMaterial, in: Circle())
+                .overlay(Circle().strokeBorder(.separator.opacity(0.6), lineWidth: 0.5))
+                .shadow(color: .black.opacity(0.15), radius: 4, y: 1)
+        }
+        .buttonStyle(.plain)
+        .opacity(visible ? 1 : 0)
+        .animation(.easeInOut(duration: 0.15), value: visible)
+        .allowsHitTesting(visible)
     }
 }
