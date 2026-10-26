@@ -5,7 +5,7 @@ import PDFKit
 /// "Compress PDF" pick a file, open it, and queue the action here.
 enum LaunchAction: String, CaseIterable, Sendable {
     case annotate, draw, fillAndSign, measure, redact, scan, pages, sign
-    case compress, recognizeText, setPassword, pageNumbers, resizePages, split, exportWord, exportImages, compare
+    case compress, recognizeText, setPassword, pageNumbers, resizePages, split, exportWord, exportExcel, exportPowerPoint, exportImages, compare
 }
 
 @MainActor
@@ -68,6 +68,8 @@ extension EditorController {
         case .resizePages: showPageSize = true
         case .split: showSplit = true
         case .exportWord: Exporter.rich(self, .word)
+        case .exportExcel: Exporter.excel(self)
+        case .exportPowerPoint: Exporter.powerPoint(self)
         case .exportImages: showExportImages = true
         case .compare: CompareWindow.compare(self)
         }

@@ -81,6 +81,8 @@ struct PagecraftCommands: Commands {
                 .disabled(editor == nil)
             Menu("Export To") {
                 Button("Word Document (.docx)…") { editor.map { Exporter.rich($0, .word) } }
+                Button("Excel Workbook (.xlsx)…") { run(Exporter.excel) }
+                Button("PowerPoint (.pptx)…") { run(Exporter.powerPoint) }
                 Button("Rich Text (.rtf)…") { editor.map { Exporter.rich($0, .rtf) } }
                 Button("Web Page (.html)…") { editor.map { Exporter.rich($0, .html) } }
                 Button("Plain Text…") { run(Exporter.text) }

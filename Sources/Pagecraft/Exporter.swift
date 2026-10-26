@@ -66,6 +66,39 @@ enum Exporter {
         editor.showToast("Exported \(url.lastPathComponent)", url: url)
     }
 
+    /// Tables become worksheets: Vision's table recognition on macOS 26, text layout analysis before that.
+    static func excel(_ editor: EditorController) {
+        guard let url = Prompt.save(UTType(filenameExtension: "xlsx") ?? .data, name: "\(editor.title).xlsx", title: "Export to Excel") else { return }
+        editor.busy = "Finding tables…"
+        let document = editor.document
+        Task { @MainActor in
+            let data = await OfficeExport.xlsx(document)
+            editor.busy = nil
+            guard let data, (try? data.write(to: url)) != nil else {
+                Prompt.error("Export failed. The document may contain no text — run Recognize Text first.")
+                return
+            }
+            editor.showToast("Exported \(url.lastPathComponent)", url: url)
+        }
+    }
+
+    /// One slide per page: the page's artwork as the background and its text as editable text boxes.
+    static func powerPoint(_ editor: EditorController) {
+        guard let url = Prompt.save(UTType(filenameExtension: "pptx") ?? .data, name: "\(editor.title).pptx", title: "Export to PowerPoint") else { return }
+        editor.busy = "Building slides…"
+        DispatchQueue.main.async {
+            // Without PDFium the background keeps the text and the boxes over it are transparent.
+            let background = editor.document.dataRepresentation().flatMap { ContentEditor.textFreeRenderer(for: $0) }
+            let data = OfficeExport.pptx(editor.document, background: background)
+            editor.busy = nil
+            guard let data, (try? data.write(to: url)) != nil else {
+                Prompt.error("Export failed.")
+                return
+            }
+            editor.showToast("Exported \(url.lastPathComponent)", url: url)
+        }
+    }
+
     static func text(_ editor: EditorController) {
         write(editor, PDFOps.plainText(editor.document), type: .plainText, name: "\(editor.title).txt")
     }
