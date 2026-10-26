@@ -7,6 +7,10 @@ final class PDFFile: ReferenceFileDocument {
     static var readableContentTypes: [UTType] { [.pdf] }
 
     let pdf: PDFDocument
+    /// Password needed to open the file. Kept after unlocking so saving preserves the protection.
+    var userPassword: String?
+    /// Password that guards permissions; defaults to the open password.
+    var ownerPassword: String?
 
     init() {
         pdf = PDFDocument()
@@ -21,7 +25,8 @@ final class PDFFile: ReferenceFileDocument {
     }
 
     func snapshot(contentType: UTType) throws -> Data {
-        guard let data = pdf.dataRepresentation() else { throw CocoaError(.fileWriteUnknown) }
+        let options = PDFOps.WriteOptions(userPassword: userPassword, ownerPassword: ownerPassword)
+        guard let data = PDFOps.data(pdf, options: options) else { throw CocoaError(.fileWriteUnknown) }
         return data
     }
 

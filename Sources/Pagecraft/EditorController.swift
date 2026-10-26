@@ -212,6 +212,10 @@ final class EditorController: ObservableObject {
     @Published var showSignaturePad = false
     @Published var showProperties = false
     @Published var showPasswordSheet = false
+    @Published var showReduceSize = false
+    @Published var showExportImages = false
+    /// Message for a blocking progress overlay, while a long operation runs.
+    @Published var busy: String?
     @Published var needsPassword: Bool
     @Published var toast: Toast?
     @Published var focusPageField = false
@@ -237,6 +241,12 @@ final class EditorController: ObservableObject {
     var fileURL: URL? {
         pdfView?.window.flatMap { NSDocumentController.shared.document(for: $0)?.fileURL }
     }
+
+    var currentFileSize: Int? {
+        fileURL.flatMap { try? $0.resourceValues(forKeys: [.fileSizeKey]).fileSize } ?? document.dataRepresentation()?.count
+    }
+
+    var isPasswordProtected: Bool { file.userPassword != nil }
 
     // MARK: View wiring
 
@@ -785,8 +795,48 @@ final class EditorController: ObservableObject {
 
     func unlock(with password: String) -> Bool {
         guard document.unlock(withPassword: password) else { return false }
+        file.userPassword = password
         needsPassword = false
         changed()
         return true
+    }
+
+    // MARK: Protection and OCR
+
+    /// Sets (or with nil, removes) the password required to open this document. Takes effect when saved.
+    func setPassword(_ password: String?) {
+        let previous = file.userPassword
+        file.userPassword = password
+        file.ownerPassword = nil
+        registerUndo(password == nil ? "Remove Password" : "Set Password") { $0.setPassword(previous) }
+        objectWillChange.send()
+        showToast(password == nil ? "Password removed — save to apply" : "Password set — save to apply")
+    }
+
+    /// Adds a searchable text layer to scanned pages using on-device text recognition.
+    func recognizeText() {
+        let scanned = PDFOps.pages(of: document).filter { ($0.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count
+        guard scanned > 0 else {
+            showToast("Every page already has selectable text")
+            return
+        }
+        guard let data = document.dataRepresentation() else { return }
+        busy = "Recognizing text on \(scanned) \(scanned == 1 ? "page" : "pages")…"
+        Task.detached(priority: .userInitiated) {
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".pdf")
+            let ok = PDFDocument(data: data)?.write(to: url, withOptions: [.saveTextFromOCROption: true]) ?? false
+            await MainActor.run { self.finishRecognition(ok ? url : nil, scanned: scanned) }
+        }
+    }
+
+    private func finishRecognition(_ url: URL?, scanned: Int) {
+        busy = nil
+        guard let url, let recognized = PDFDocument(url: url), recognized.pageCount == pageCount else {
+            Prompt.error("Couldn’t recognize text.")
+            return
+        }
+        let found = PDFOps.pages(of: recognized).filter { !($0.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count
+        setPages(PDFOps.copies(of: PDFOps.pages(of: recognized)), actionName: "Recognize Text")
+        showToast(found > pageCount - scanned ? "Text recognized — the document is now searchable" : "No legible text found")
     }
 }

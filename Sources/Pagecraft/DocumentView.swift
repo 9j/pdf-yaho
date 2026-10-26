@@ -70,10 +70,16 @@ struct DocumentView: View {
                     Label("Display", systemImage: "textformat.size")
                 }
                 .help("Page layout and reading theme")
-                if let url = editor.fileURL {
-                    ShareLink(item: url) { Label("Share", systemImage: "square.and.arrow.up") }
-                        .help("Share")
+                Menu {
+                    Button("Share Document…") { Exporter.share(editor, flattened: false) }
+                    Button("Share Flattened…") { Exporter.share(editor, flattened: true) }
+                    Divider()
+                    Button("Mail Document") { Exporter.mail(editor, flattened: false) }
+                    Button("Mail Flattened") { Exporter.mail(editor, flattened: true) }
+                } label: {
+                    Label("Share", systemImage: "square.and.arrow.up")
                 }
+                .help("Share or mail this document")
             }
         }
         .searchable(text: $editor.searchText, placement: .toolbar, prompt: "Search")
@@ -92,6 +98,22 @@ struct DocumentView: View {
         .sheet(isPresented: $editor.showSignaturePad) { SignaturePad(editor: editor) }
         .sheet(isPresented: $editor.showProperties) { PropertiesView(editor: editor) }
         .sheet(isPresented: $editor.showPasswordSheet) { PasswordSheet(editor: editor) }
+        .sheet(isPresented: $editor.showReduceSize) { ReduceSizeSheet(editor: editor) }
+        .sheet(isPresented: $editor.showExportImages) { ExportImagesSheet(editor: editor) }
+        .overlay {
+            if let message = editor.busy {
+                ZStack {
+                    Color.black.opacity(0.15)
+                    VStack(spacing: 12) {
+                        ProgressView().controlSize(.large)
+                        Text(message).font(.callout)
+                    }
+                    .padding(24)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                }
+                .ignoresSafeArea()
+            }
+        }
         .sheet(isPresented: $editor.needsPassword) { UnlockView(editor: editor) }
     }
 }
@@ -143,39 +165,6 @@ struct UnlockView: View {
     private func unlock() {
         failed = !editor.unlock(with: password)
         if !failed { dismiss() }
-    }
-}
-
-struct PasswordSheet: View {
-    @ObservedObject var editor: EditorController
-    @Environment(\.dismiss) private var dismiss
-    @State private var password = ""
-    @State private var confirm = ""
-
-    private var mismatch: Bool { !confirm.isEmpty && confirm != password }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            SheetHeader(symbol: "lock.shield", title: "Protect with a password",
-                        subtitle: "Saves an encrypted copy. Anyone opening it will need this password.")
-            VStack(spacing: 8) {
-                SecureField("Password", text: $password).textFieldStyle(.roundedBorder)
-                SecureField("Confirm password", text: $confirm).textFieldStyle(.roundedBorder)
-            }
-            if mismatch { Label("Passwords don’t match", systemImage: "exclamationmark.circle").foregroundStyle(.red).font(.callout) }
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Save Copy…") {
-                    dismiss()
-                    DispatchQueue.main.async { Exporter.passwordProtected(editor, password: password) }
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(password.isEmpty || confirm != password)
-            }
-        }
-        .padding(22)
-        .frame(width: 400)
     }
 }
 

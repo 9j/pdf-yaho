@@ -68,16 +68,39 @@ struct PagecraftCommands: Commands {
                 .keyboardShortcut("1", modifiers: [.command, .shift])
         }
         CommandGroup(after: .saveItem) {
-            Menu("Export As") {
+            Button("Save As Flattened…") { run(Exporter.flattened) }
+                .keyboardShortcut("s", modifiers: [.command, .option, .shift])
+                .disabled(editor == nil)
+            Menu("Export To") {
+                Button("Word Document (.docx)…") { editor.map { Exporter.rich($0, .word) } }
+                Button("Rich Text (.rtf)…") { editor.map { Exporter.rich($0, .rtf) } }
+                Button("Web Page (.html)…") { editor.map { Exporter.rich($0, .html) } }
                 Button("Plain Text…") { run(Exporter.text) }
                 Button("Markdown…") { run(Exporter.markdown) }
-                Button("PNG Images…") { run(Exporter.images) }
-                Button("Annotation Summary…") { run(Exporter.annotationSummary) }
+                Divider()
+                Button("Images…") { editor?.showExportImages = true }
+                Button("Flattened PDF…") { run(Exporter.flattened) }
+                Divider()
+                Button("Annotations (XFDF)…") { run(Exporter.xfdf) }
+                Button("Annotation Summary (Markdown)…") { run(Exporter.annotationSummary) }
             }
             .disabled(editor == nil)
-            Button("Save as Flattened…") { run(Exporter.flattened) }.disabled(editor == nil)
-            Button("Reduce File Size…") { run(Exporter.reducedSize) }.disabled(editor == nil)
-            Button("Protect with Password…") { editor?.showPasswordSheet = true }.disabled(editor == nil)
+            Menu("Share") {
+                Button("Share Document…") { editor.map { Exporter.share($0, flattened: false) } }
+                Button("Share Flattened…") { editor.map { Exporter.share($0, flattened: true) } }
+                Divider()
+                Button("Mail Document") { editor.map { Exporter.mail($0, flattened: false) } }
+                Button("Mail Flattened") { editor.map { Exporter.mail($0, flattened: true) } }
+            }
+            .disabled(editor == nil)
+            Divider()
+            Button("Reduce File Size…") { editor?.showReduceSize = true }.disabled(editor == nil)
+            Button("Recognize Text (OCR)…") { editor?.recognizeText() }.disabled(editor == nil)
+            Button(editor?.isPasswordProtected == true ? "Change Password…" : "Set Password…") { editor?.showPasswordSheet = true }
+                .disabled(editor == nil)
+            if editor?.isPasswordProtected == true {
+                Button("Remove Password") { editor?.setPassword(nil) }
+            }
             Divider()
             Button("Properties…") { editor?.showProperties = true }
                 .keyboardShortcut("i", modifiers: [.command, .option])

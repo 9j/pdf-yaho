@@ -1,5 +1,6 @@
 import AppKit
 import PDFKit
+import Quartz
 
 /// Document-level operations. Everything here is UI-free so it can be unit tested.
 public enum PDFOps {
@@ -173,33 +174,177 @@ public enum PDFOps {
 
     // MARK: Writing
 
+    /// Image quality presets for Reduce File Size. `lossless` only re-optimises the file structure.
+    public enum Compression: String, CaseIterable, Identifiable, Sendable {
+        case lossless = "Lossless", high = "High", medium = "Medium", low = "Low"
+        public var id: String { rawValue }
+        var jpegQuality: Double { self == .high ? 0.8 : self == .medium ? 0.6 : 0.35 }
+        var resolution: Int { self == .high ? 200 : self == .medium ? 144 : 96 }
+        public var detail: String {
+            switch self {
+            case .lossless: "Restructures the file without touching images"
+            case .high: "Images at 200 dpi, light JPEG compression"
+            case .medium: "Images at 144 dpi, balanced for screens"
+            case .low: "Images at 96 dpi, smallest file"
+            }
+        }
+    }
+
     public struct WriteOptions {
         public var flatten = false
-        public var compressImages = false
+        public var compression: Compression?
+        public var performOCR = false
         public var userPassword: String?
         public var ownerPassword: String?
-        public init(flatten: Bool = false, compressImages: Bool = false, userPassword: String? = nil, ownerPassword: String? = nil) {
+        public init(flatten: Bool = false, compression: Compression? = nil, performOCR: Bool = false,
+                    userPassword: String? = nil, ownerPassword: String? = nil) {
             self.flatten = flatten
-            self.compressImages = compressImages
+            self.compression = compression
+            self.performOCR = performOCR
             self.userPassword = userPassword
             self.ownerPassword = ownerPassword
+        }
+
+        var dictionary: [PDFDocumentWriteOption: Any] {
+            var o: [PDFDocumentWriteOption: Any] = [:]
+            if flatten { o[.burnInAnnotationsOption] = true }
+            if performOCR { o[.saveTextFromOCROption] = true }
+            if let compression {
+                o[.optimizeImagesForScreenOption] = true
+                if compression != .lossless {
+                    o[.saveImagesAsJPEGOption] = true
+                    if let filter = PDFOps.compressionFilter(compression) { o[PDFDocumentWriteOption(rawValue: "QuartzFilter")] = filter }
+                }
+            }
+            if let user = userPassword, !user.isEmpty {
+                o[.userPasswordOption] = user
+                o[.ownerPasswordOption] = ownerPassword ?? user
+            } else if let owner = ownerPassword, !owner.isEmpty {
+                o[.ownerPasswordOption] = owner
+            }
+            return o
         }
     }
 
     @discardableResult
     public static func write(_ doc: PDFDocument, to url: URL, options: WriteOptions = WriteOptions()) -> Bool {
-        var o: [PDFDocumentWriteOption: Any] = [:]
-        if options.flatten { o[.burnInAnnotationsOption] = true }
-        if options.compressImages {
-            o[.saveImagesAsJPEGOption] = true
-            o[.optimizeImagesForScreenOption] = true
+        doc.write(to: url, withOptions: options.dictionary)
+    }
+
+    public static func data(_ doc: PDFDocument, options: WriteOptions = WriteOptions()) -> Data? {
+        doc.dataRepresentation(options: options.dictionary)
+    }
+
+    /// A Quartz filter like the system "Reduce File Size", with the preset's quality and resolution.
+    static func compressionFilter(_ compression: Compression) -> QuartzFilter? {
+        let plist: [String: Any] = [
+            "Domains": ["Applications": true, "Printing": true],
+            "FilterType": 1,
+            "Name": "Pagecraft \(compression.rawValue)",
+            "FilterData": ["ColorSettings": ["ImageSettings": [
+                "Compression Quality": compression.jpegQuality,
+                "ImageCompression": "ImageJPEGCompress",
+                "ImageScaleSettings": ["ImageResolution": compression.resolution, "ImageScaleInterpolate": true,
+                                       "ImageSizeMax": 4000, "ImageSizeMin": 0],
+            ]]],
+        ]
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("pagecraft-\(compression.rawValue).qfilter")
+        guard let data = try? PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0),
+              (try? data.write(to: url)) != nil
+        else { return nil }
+        return QuartzFilter(url: url)
+    }
+
+    // MARK: Rich export
+
+    public enum TextFormat: String, CaseIterable, Sendable {
+        case word = "docx", rtf, html
+        var documentType: NSAttributedString.DocumentType {
+            switch self {
+            case .word: .officeOpenXML
+            case .rtf: .rtf
+            case .html: .html
+            }
         }
-        if let user = options.userPassword, !user.isEmpty {
-            o[.userPasswordOption] = user
-            o[.ownerPasswordOption] = options.ownerPassword ?? user
-        } else if let owner = options.ownerPassword, !owner.isEmpty {
-            o[.ownerPasswordOption] = owner
+    }
+
+    /// The document's text with fonts and styles, one page after another.
+    public static func attributedText(_ doc: PDFDocument) -> NSAttributedString {
+        let out = NSMutableAttributedString()
+        for (i, page) in pages(of: doc).enumerated() {
+            if i > 0 { out.append(NSAttributedString(string: "\n\u{0C}")) }
+            if let text = page.attributedString { out.append(text) }
         }
-        return doc.write(to: url, withOptions: o)
+        return out
+    }
+
+    public static func exportData(_ doc: PDFDocument, as format: TextFormat) -> Data? {
+        let text = attributedText(doc)
+        return try? text.data(from: NSRange(location: 0, length: text.length),
+                              documentAttributes: [.documentType: format.documentType])
+    }
+
+    public enum ImageFormat: String, CaseIterable, Identifiable, Sendable {
+        case png = "PNG", jpeg = "JPEG", tiff = "TIFF"
+        public var id: String { rawValue }
+        public var fileExtension: String { self == .jpeg ? "jpg" : rawValue.lowercased() }
+        var fileType: NSBitmapImageRep.FileType { self == .png ? .png : self == .jpeg ? .jpeg : .tiff }
+    }
+
+    public static func imageData(_ page: PDFPage, format: ImageFormat, dpi: CGFloat) -> Data? {
+        guard let cg = renderImage(page, scale: dpi / 72) else { return nil }
+        let rep = NSBitmapImageRep(cgImage: cg)
+        rep.size = NSSize(width: CGFloat(cg.width) * 72 / dpi, height: CGFloat(cg.height) * 72 / dpi)
+        return rep.representation(using: format.fileType, properties: format == .jpeg ? [.compressionFactor: 0.88] : [:])
+    }
+
+    /// Annotations as XFDF, the XML exchange format other PDF apps import.
+    public static func xfdf(_ doc: PDFDocument, fileName: String) -> String {
+        func esc(_ s: String) -> String {
+            s.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;")
+                .replacingOccurrences(of: ">", with: "&gt;").replacingOccurrences(of: "\"", with: "&quot;")
+        }
+        func hex(_ c: NSColor) -> String {
+            let c = c.usingColorSpace(.sRGB) ?? c
+            return String(format: "#%02X%02X%02X", Int(c.redComponent * 255), Int(c.greenComponent * 255), Int(c.blueComponent * 255))
+        }
+        let tags = ["Highlight": "highlight", "Underline": "underline", "StrikeOut": "strikeout", "Squiggly": "squiggly",
+                    "Ink": "ink", "FreeText": "freetext", "Text": "text", "Square": "square", "Circle": "circle",
+                    "Line": "line", "Stamp": "stamp", "Link": "link"]
+        var lines = ["<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+                     "<xfdf xmlns=\"http://ns.adobe.com/xfdf/\" xml:space=\"preserve\">",
+                     "<f href=\"\(esc(fileName))\"/>", "<annots>"]
+        for (index, page) in pages(of: doc).enumerated() {
+            for a in page.annotations where Annotations.isUserEditable(a) {
+                guard let tag = tags[a.type ?? ""] else { continue }
+                let r = a.bounds
+                var attrs = "page=\"\(index)\" rect=\"\(r.minX),\(r.minY),\(r.maxX),\(r.maxY)\" color=\"\(hex(Annotations.color(of: a)))\""
+                if let author = a.userName, !author.hasPrefix("org.pagecraft") { attrs += " title=\"\(esc(author))\"" }
+                if let date = a.modificationDate { attrs += " date=\"\(ISO8601DateFormatter().string(from: date))\"" }
+                if tag == "line" {
+                    let s = a.startPoint + r.origin, e = a.endPoint + r.origin
+                    attrs += " start=\"\(s.x),\(s.y)\" end=\"\(e.x),\(e.y)\""
+                }
+                if ["highlight", "underline", "strikeout", "squiggly"].contains(tag) {
+                    attrs += " coords=\"\(r.minX),\(r.maxY),\(r.maxX),\(r.maxY),\(r.minX),\(r.minY),\(r.maxX),\(r.minY)\""
+                }
+                var body = ""
+                if let contents = a.contents, !contents.isEmpty { body += "<contents>\(esc(contents))</contents>" }
+                if tag == "ink", let paths = a.paths {
+                    body += "<inklist>" + paths.map { path in
+                        var points: [String] = []
+                        var pts = [NSPoint](repeating: .zero, count: 3)
+                        for i in 0..<path.elementCount {
+                            path.element(at: i, associatedPoints: &pts)
+                            points.append("\(pts[0].x + r.minX),\(pts[0].y + r.minY)")
+                        }
+                        return "<gesture>\(points.joined(separator: ";"))</gesture>"
+                    }.joined() + "</inklist>"
+                }
+                lines.append("<\(tag) \(attrs)>\(body)</\(tag)>")
+            }
+        }
+        lines += ["</annots>", "</xfdf>"]
+        return lines.joined(separator: "\n")
     }
 }
