@@ -19,6 +19,14 @@ arm64/x86_64 Mach-O, SHA-256 `d48539f11c99da7ed5ac8dffac27628b8344c98a56e0153ed7
 - **Menu commands** came from the bundle's `en.lproj/MainMenu.strings`. Only the titles
   were used, as a list of features.
 
+- **Asset catalogs** (REA `inspect_asset_catalog`, Evidence
+  `ev_6f56e6ed8ca131850b2251ea34604ee6ca65d866821fc92cceffff3307157c33`; 2,719 records in 11
+  catalogs). Only the asset *names* were read. They show the toolbar's toolsets ("ribbons"),
+  tool families (squiggly, callout, cloud shapes, line endings, border types), scan tools,
+  sidebar panels and the merge dialog.
+- **HomeTab design notes** shipped inside the bundle (`HomeTab.framework/.../ARCHITECTURE.md`)
+  describe the Home tab's pages (Home, Recents, Favorites, Tools) and behaviour.
+
 No runtime tracing or decompilation was needed. The menu titles and plist answer what the
 app offers. How Pagecraft implements each feature was decided independently.
 
@@ -34,10 +42,20 @@ The second pass went through all 1,700 English UI strings in the bundle's
 | Reading | Zoom, Fit Width/Page, Go to Page, Back/Forward | ✅ |
 | Reading | Thumbnails, Outline/Bookmarks, Annotations panel | ✅ |
 | Reading | Find, Match Case, Whole Words | ✅ |
-| Reading | Split View / Compare PDFs, Sync Scroll and Zoom, Swap Sides | ✅ |
+| Reading | Split View in the window, Compare PDFs, Sync Scroll and Zoom, Swap Sides | ✅ |
+| Reading | Bookmarks (personal) with page-corner ribbon, editable Outline | ✅ |
+| Reading | Back to p. N after jumps, search history, auto-hiding page indicator | ✅ |
+| Interface | Toolsets in the toolbar (Annotate, Draw, Fill & Sign, Measure, Redact, Scan), hide unused | ✅ |
+| Interface | Home: Tools for You, Recents, Favorites, Tools page, drop to open | ✅ |
+| Interface | Documents in tabs, Settings (tabs/windows, defaults, page indicator, author) | ✅ |
 | Annotate | Highlight, Underline, Strikeout | ✅ |
 | Annotate | Pen, Marker, Eraser | ✅ |
-| Annotate | Text, Note, Callout | ✅ text and note · ⏳ callout |
+| Annotate | Text (font, bold/italic, alignment, background), Note, Callout | ✅ |
+| Annotate | Squiggly underline | ✅ custom-drawn (PDFKit saves but never draws it) |
+| Annotate | Cloud rectangle and cloud polygon (redline) | ✅ |
+| Annotate | Border types (solid, dashed ×3, dotted, dash-dotted), line endings | ✅ |
+| Annotate | Shift to constrain lines and shapes | ✅ |
+| Annotate | Image annotation: replace, save | ✅ |
 | Annotate | Rectangle, Oval, Line, Arrow, Double Arrow, Polygon, Polyline | ✅ |
 | Annotate | Colour, Opacity, Thickness, Fill, Dashed/Dotted lines | ✅ |
 | Annotate | Text Stamps, Image Stamps, custom stamps | ✅ |
@@ -45,7 +63,7 @@ The second pass went through all 1,700 English UI strings in the bundle's
 | Annotate | Copy, Cut, Paste, Duplicate, Bring to Front, Send to Back | ✅ |
 | Annotate | Author name on annotations | ✅ Settings |
 | Annotate | Export Annotations (XFDF), Annotation Summary | ✅ |
-| Annotate | Squiggly, Sound, Attachment | ❌ PDFKit cannot create these |
+| Annotate | Sound notes, file attachments, hatch fill patterns, variable-width pen | ❌ |
 | Fill & Sign | Signatures and initials: draw, type, image; several saved | ✅ |
 | Fill & Sign | Checkmark, Cross, Date | ✅ |
 | Forms | Fill forms, Clear Form | ✅ |
@@ -55,6 +73,7 @@ The second pass went through all 1,700 English UI strings in the bundle's
 | Redact | Redact area, Black Box or White Out, Apply | ✅ |
 | Redact | Find and Redact | ✅ |
 | Pages | Insert blank / from file / images / clipboard, Duplicate, Delete, Reorder | ✅ |
+| Pages | Copy, Cut and Paste pages | ✅ |
 | Pages | Rotate, Reverse | ✅ |
 | Pages | Crop (page or all), Clear Margins, Reset Crop | ✅ |
 | Pages | Page Size / Resize with scale to fit | ✅ |
@@ -69,9 +88,11 @@ The second pass went through all 1,700 English UI strings in the bundle's
 | File | Export to Word, RTF, HTML, Text, Markdown, PNG/JPEG/TIFF | ✅ |
 | File | Export to Excel, PowerPoint | ❌ |
 | File | Convert Word, ODT, RTF, HTML, Markdown, text and images to PDF | ✅ |
+| File | Merge Files window (drop, reorder, unlock, convert any type) | ✅ |
 | File | Properties | ✅ |
 | Scan | Recognize Text (OCR) | ✅ on-device |
-| Scan | Enhance Scan, Remove Distortion | ⏳ |
+| Scan | Enhance Scan (black & white, grayscale, colour), Split book spreads | ✅ |
+| Scan | Remove perspective distortion, camera scanning | ❌ |
 | Edit PDF | Edit existing text and images in the page content | ❌ PDFKit cannot edit page content |
 | AI | Copilot, Chat, Summarize, Translate | ❌ not planned. Cloud AI does not fit a free offline app. |
 

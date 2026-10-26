@@ -9,16 +9,25 @@ reading, annotating, signing, redacting, filling forms and rearranging pages.
 
 ## Using it
 
-The toolbar switches between three modes:
+The toolbar holds the **toolsets**. Each one shows only the tools for one task, in a
+floating bar at the top of the page:
 
-- **Read** is a clean reading view. Select text and a small menu offers Highlight, Underline, Strike and Copy.
-- **Markup** shows a floating tool palette. Each tool remembers its own colour and size, which you set
-  under **Style**. Click any annotation to select it. You can then drag it, resize it from a corner,
-  change its colour, duplicate it or delete it. Text boxes and notes are typed directly on the page.
-- **Pages** shows every page as a large thumbnail. Click, ⌘-click or ⇧-click to select pages, and drag
-  them to reorder. The bar at the bottom rotates, inserts, extracts and deletes.
+| Toolset | Tools |
+| --- | --- |
+| Read | No tools. Select text for a Highlight / Underline / Strike / Copy menu. |
+| Annotate | Highlight, underline, squiggly, strikeout, text, notes, callouts, stamps, images, links |
+| Draw | Pen, marker, rectangles, ovals, lines, arrows, polygons, clouds |
+| Fill & Sign | Text, checkmarks, crosses, dates, signatures and initials, stamps, form fields |
+| Measure | Distance, perimeter and area at a scale you set |
+| Redact | Black-box or white-out marks, Find and Redact, Apply |
+| Scan | OCR, Enhance, clear margins, crop, page size, split book spreads |
+| Pages | Large thumbnails. Select, drag to reorder, rotate, insert, copy/paste, extract, delete. |
 
-A capsule at the bottom of the page handles page navigation and zoom.
+Hide toolsets you never use with the **…** button. **Style** sets colour, size, opacity,
+fill, line style and text formatting, for the active tool or the selected annotation. Click
+an annotation to move it, resize it, change it or delete it. Hold ⇧ to keep lines straight
+and shapes square. The **Display** button sets the page layout and theme, and opens a
+second document in split view.
 
 | Key | Tool | Key | Tool |
 | --- | --- | --- | --- |
@@ -26,15 +35,18 @@ A capsule at the bottom of the page handles page navigation and zoom.
 | H | Highlight | N | Note |
 | U | Underline | R / O / L / A | Rectangle / Oval / Line / Arrow |
 | K | Strikeout | G | Signature |
-| P | Pen | X | Redact |
-| E | Eraser | ⌫ | Delete selected annotation |
-| ⌘1 / ⌘2 / ⌘3 | Read / Markup / Pages | Arrow keys | Nudge selection (⇧ for 10 pt) |
+| P / M | Pen / Marker | X | Redact |
+| E | Eraser | C / S | Crop / Snapshot |
+| ⌘1 … ⌘8 | Toolsets | ⌘D | Bookmark page |
+| ⌫ | Delete selection | Arrow keys | Nudge selection (⇧ for 10 pt) |
 
 ## Features
 
+- **Home**: recent and favourite documents, and a Tools page that opens a file straight
+  into a task such as compressing or signing it.
 - **Read**: continuous, single, two-page and book layouts. Day, night and sepia themes.
-  Thumbnails, bookmarks, annotation list. Search with match-case and whole-word options.
-  Back/forward history.
+  Thumbnails, bookmarks, an editable outline, and an annotation list with filters.
+  Search with match-case, whole-word and history. Back/forward history.
 - **Compare**: two PDFs side by side or stacked, with scroll and zoom kept in sync.
 - **Annotate**: highlight, underline, strikeout, pen, marker, text, notes, rectangles, ovals,
   lines, arrows, polygons, stamps, images and links. Set colour, opacity, thickness, fill and
