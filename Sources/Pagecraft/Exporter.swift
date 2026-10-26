@@ -132,10 +132,7 @@ enum Exporter {
     }
 
     static func mergeFiles() {
-        let urls = Prompt.open([.pdf], multiple: true, title: "Choose PDFs to Merge")
-        guard !urls.isEmpty else { return }
-        let docs = urls.compactMap(PDFDocument.init(url:))
-        saveAndOpen(PDFOps.merge(docs), name: "Merged.pdf", title: "Save Merged PDF")
+        MergeWindow.show()
     }
 
     static func newFromImages() {
