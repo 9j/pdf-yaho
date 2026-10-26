@@ -15,6 +15,7 @@ floating bar at the top of the page:
 | Toolset | Tools |
 | --- | --- |
 | Read | No tools. Select text for a Highlight / Underline / Strike / Copy menu. |
+| Edit | The page's own text and images: retype, restyle, move, resize, replace, add, delete |
 | Annotate | Highlight, underline, squiggly, strikeout, text, notes, callouts, stamps, images, links |
 | Draw | Pen, marker, rectangles, ovals, lines, arrows, polygons, clouds |
 | Fill & Sign | Text, checkmarks, crosses, dates, signatures and initials, stamps, form fields |
@@ -37,7 +38,7 @@ second document in split view.
 | K | Strikeout | G | Signature |
 | P / M | Pen / Marker | X | Redact |
 | E | Eraser | C / S | Crop / Snapshot |
-| ⌘1 … ⌘8 | Toolsets | ⌘D | Bookmark page |
+| ⌘1 … ⌘9 | Toolsets | ⌘D | Bookmark page |
 | ⌫ | Delete selection | Arrow keys | Nudge selection (⇧ for 10 pt) |
 
 ## Features
@@ -47,6 +48,9 @@ second document in split view.
 - **Read**: continuous, single, two-page and book layouts. Day, night and sepia themes.
   Thumbnails, bookmarks, an editable outline, and an annotation list with filters.
   Search with match-case, whole-word and history. Back/forward history.
+- **Edit PDF**: click a paragraph to retype it in place, in its own font and width, in any
+  language. Move text and images, resize or replace images, add new text and images, and
+  change font, size and colour. Every edit is one undo step.
 - **Compare**: two PDFs side by side or stacked, with scroll and zoom kept in sync.
 - **Annotate**: highlight, underline, strikeout, pen, marker, text, notes, rectangles, ovals,
   lines, arrows, polygons, stamps, images and links. Set colour, opacity, thickness, fill and
@@ -58,11 +62,12 @@ second document in split view.
   them flattens the marked pages, so the text underneath is actually removed.
 - **Pages**: reorder, rotate, insert (blank, file, images, clipboard), duplicate, delete,
   crop, trim margins, resize, extract, split and merge. Add page numbers, headers, footers
-  and Bates numbers.
+  and Bates numbers. Edit page labels (i, ii … then 1, 2 …).
 - **Save and share**: Save As Flattened. Share or mail a copy, as is or flattened. Reduce
   file size with four quality levels. Protect the document with a password. Recognise text
   in scans (OCR, on device).
-- **Convert**: export to Word, RTF, HTML, text, Markdown, PNG/JPEG/TIFF or XFDF. Turn Word,
+- **Convert**: export to Word, Excel (tables become sheets), PowerPoint (a slide per page with
+  editable text), RTF, HTML, text, Markdown, PNG/JPEG/TIFF or XFDF. Turn Word,
   RTF, HTML, Markdown, text and image files into PDF.
 
 ## Requirements
@@ -72,11 +77,18 @@ macOS 14 or later. Building needs Xcode 16 or the Swift 6 toolchain.
 ## Build
 
 ```sh
+scripts/fetch-pdfium.sh         # once: pinned PDFium for Edit mode (build-app.sh runs it too)
 scripts/build-app.sh            # universal release build → build/Pagecraft.app
 ARCHS=arm64 scripts/build-app.sh debug
 open build/Pagecraft.app
 swift test                      # unit tests for PagecraftCore
 ```
+
+Editing page content uses [PDFium](https://pdfium.googlesource.com/pdfium/) (BSD-3/Apache-2.0),
+from the prebuilt [pdfium-binaries](https://github.com/bblanchon/pdfium-binaries) release pinned
+in `scripts/fetch-pdfium.sh`. It is bundled in `Contents/Frameworks` with its licences in
+`Contents/Resources/Licenses/PDFium`. Without `Vendor/pdfium` the package still builds, with
+Edit mode turned off.
 
 The app is ad-hoc signed. The first time you open a copy built on another Mac,
 right-click it and choose **Open**.
@@ -88,7 +100,9 @@ right-click it and choose **Open**.
 | `Sources/PagecraftCore` | UI-free document operations: page edits, annotation factories, export, signatures. Unit tested. |
 | `Sources/Pagecraft` | SwiftUI app: document window, PDF view and tools, sidebar, menus. |
 | `Tests/PagecraftCoreTests` | XCTest suite for the core. |
+| `Sources/CPDFium` | Module map for the vendored PDFium headers. |
 | `scripts/build-app.sh` | Builds the `.app` bundle. |
+| `scripts/fetch-pdfium.sh` | Downloads and checks the pinned PDFium into `Vendor/pdfium`. |
 | `scripts/make-icon.swift` | Draws the app icon (`Resources/AppIcon.icns` is built from it). |
 
 ## Clean-room note

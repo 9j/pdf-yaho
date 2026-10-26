@@ -68,7 +68,7 @@ The second pass went through all 1,700 English UI strings in the bundle's
 | Fill & Sign | Checkmark, Cross, Date | ✅ |
 | Forms | Fill forms, Clear Form | ✅ |
 | Forms | Create Text Field, Checkbox, Radio Button, Drop-down | ✅ |
-| Forms | XFA forms, Form Assistant, Submit to URL | ❌ |
+| Forms | XFA forms, Form Assistant, Submit to URL | ❌ XFA is deprecated in PDF 2.0; static XFA files usually carry AcroForm fields, which work |
 | Measure | Distance, Perimeter, Area, Scale | ✅ |
 | Redact | Redact area, Black Box or White Out, Apply | ✅ |
 | Redact | Find and Redact | ✅ |
@@ -79,21 +79,22 @@ The second pass went through all 1,700 English UI strings in the bundle's
 | Pages | Page Size / Resize with scale to fit | ✅ |
 | Pages | Extract, Split (every N, odd/even, ranges), Merge | ✅ |
 | Pages | Page Numbers, Header and Footer, Bates Numbering | ✅ |
-| Pages | Page Labels (i, ii, iii…) | ❌ PDFKit has no API for writing page labels |
+| Pages | Page Labels (i, ii, iii…), shown in thumbnails and the page field | ✅ written as an incremental update, since PDFKit drops them |
 | File | Save, Save As, Revert, Open Recent, tabs, Welcome window | ✅ |
 | File | Save As Flattened, Export as Flattened | ✅ |
 | File | Share / Mail as Document or as Flattened | ✅ |
 | File | Reduce File Size (Lossless, High, Medium, Low) | ✅ |
 | File | Set, Change and Remove Password on the document | ✅ |
 | File | Export to Word, RTF, HTML, Text, Markdown, PNG/JPEG/TIFF | ✅ |
-| File | Export to Excel, PowerPoint | ❌ |
+| File | Export to Excel (tables), PowerPoint (editable text over page art) | ✅ |
 | File | Convert Word, ODT, RTF, HTML, Markdown, text and images to PDF | ✅ |
 | File | Merge Files window (drop, reorder, unlock, convert any type) | ✅ |
 | File | Properties | ✅ |
 | Scan | Recognize Text (OCR) | ✅ on-device |
 | Scan | Enhance Scan (black & white, grayscale, colour), Split book spreads | ✅ |
 | Scan | Remove perspective distortion, camera scanning | ❌ |
-| Edit PDF | Edit existing text and images in the page content | ❌ PDFKit cannot edit page content |
+| Edit PDF | Edit, move, restyle and delete existing text; add text | ✅ with PDFium |
+| Edit PDF | Move, resize, replace, save and delete images; add images | ✅ with PDFium |
 | AI | Copilot, Chat, Summarize, Translate | ❌ not planned. Cloud AI does not fit a free offline app. |
 
-✅ done · ⏳ planned · ❌ not possible with PDFKit or not planned
+✅ done · ⏳ planned · ❌ not possible or not planned
