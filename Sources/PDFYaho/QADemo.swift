@@ -163,5 +163,64 @@ extension EditorController {
         }
     }
 }
+
+extension EditorController {
+    /// Stages a scene on the demo workshop PDF for marketing screenshots: edit, annotate, sign or pages.
+    func stageShotQA(_ shot: String) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [self] in
+            pdfView?.window?.setFrame(CGRect(x: 80, y: 60, width: 1440, height: 900), display: true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [self] in
+                guard let first = document.page(at: 0) else { return }
+                let zoomOverride = ProcessInfo.processInfo.environment["PDFYAHO_QA_ZOOM"].flatMap(Double.init)
+                zoom(to: zoomOverride.map { CGFloat($0) } ?? (shot == "edit" ? 1.15 : 0.95))
+                pdfView?.go(to: PDFDestination(page: first, at: CGPoint(x: 0, y: first.bounds(for: .cropBox).maxY)))
+                switch shot {
+                case "edit":
+                    mode = .edit
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [self] in
+                        loadContent(on: first, force: true)
+                        guard let block = contentBlocks.first(where: { $0.text.hasPrefix("한 해의") }) else { return }
+                        selectedContent = block
+                        pdfView?.beginContentEditing(block, on: first)
+                        (pdfView?.window?.firstResponder as? NSTextView)?.insertText(" 저녁에는 산장 마당에서 바비큐도 준비합니다.",
+                                                                                     replacementRange: NSRange(location: block.text.utf16.count, length: 0))
+                    }
+                case "annotate":
+                    mode = .annotate
+                    for phrase in ["4월 4일까지", "등산화와 물은 꼭"] {
+                        if let match = document.findString(phrase, withOptions: []).first { applyMarkup(.highlight, to: match) }
+                    }
+                    if let match = document.findString("둘레길 코스", withOptions: []).first { applyMarkup(.underline, to: match, tool: .underline) }
+                    add(CalloutAnnotation.make(text: "비 오면 실내 일정으로?", box: CGRect(x: 360, y: 250, width: 170, height: 30),
+                                               anchor: CGPoint(x: 330, y: 215), color: Palette.swatches[2], fontSize: 12), to: first)
+                    commitNewNote("집결 시간 8시 50분으로 당길까요?", at: CGPoint(x: 540, y: 760), on: first)
+                    tool = .highlight
+                case "sign":
+                    mode = .fillSign
+                    if let signature = SavedSignature.typed("Yaho Kim", font: NSFont(name: "Snell Roundhand", size: 64) ?? .systemFont(ofSize: 64)) {
+                        addSignature(signature)
+                    }
+                    if let last = document.page(at: 3) {
+                        // Write each answer just under its label, on the form's line.
+                        let doc = document
+                        let label = { (text: String) -> CGRect? in
+                            doc.findString(text, withOptions: []).first { $0.pages.first === last }?.bounds(for: last)
+                        }
+                        for (field, value) in [("이름", "김야호"), ("소속 팀", "디자인팀"), ("코스 선택", "백운대"), ("알레르기", "없음")] {
+                            if let r = label(field) { commitNewText(value, at: CGPoint(x: r.minX + 4, y: r.minY - 3), on: last) }
+                        }
+                        if let r = label("서명") { placeSignature(at: CGPoint(x: r.minX + 95, y: r.minY - 14), on: last) }
+                        goToPage(3)
+                    }
+                    select(nil)
+                case "pages":
+                    mode = .pages
+                    selectedPages = [1, 2]
+                default: break
+                }
+            }
+        }
+    }
+}
 #endif
 

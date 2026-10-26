@@ -82,6 +82,9 @@ struct DocumentView: View {
             editor.undoManager = undoManager
             WelcomeWindowController.shared.close()
             if !Preferences.showSidebar { columns = .detailOnly }
+            #if DEBUG
+            if ProcessInfo.processInfo.environment["PDFYAHO_QA_NOSIDEBAR"] != nil { columns = .detailOnly }
+            #endif
             // The window is attached a moment after the view appears.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                 guard let window = editor.pdfView?.window else { return }
@@ -99,6 +102,7 @@ struct DocumentView: View {
                 if let step = ProcessInfo.processInfo.environment["PDFYAHO_QA_CONTENT"] { editor.runContentQA(step) }
                 if let sheet = ProcessInfo.processInfo.environment["PDFYAHO_QA_SHEET"] { editor.openSheetQA(sheet) }
                 if let steps = ProcessInfo.processInfo.environment["PDFYAHO_QA_STEPS"] { editor.runStepsQA(steps) }
+                if let shot = ProcessInfo.processInfo.environment["PDFYAHO_QA_SHOT"] { editor.stageShotQA(shot) }
                 #endif
             }
         }
