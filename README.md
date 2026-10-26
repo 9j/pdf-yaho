@@ -33,17 +33,25 @@ A capsule at the bottom of the page handles page navigation and zoom.
 ## Features
 
 - **Read**: continuous, single, two-page and book layouts. Day, night and sepia themes.
-  Thumbnails, outline, annotation list and full-text search.
-- **Annotate**: highlight, underline, strikeout, pen, text, notes, rectangles, ovals,
-  lines and arrows. Annotations can be moved, edited and erased, with full undo.
-- **Sign**: draw a signature once, then place it on any page.
-- **Redact**: mark areas, then apply. Marked pages are flattened into images, so the
-  covered text is actually removed and not just hidden.
-- **Organise pages**: drag to reorder, rotate, insert blank pages, insert pages from
-  another PDF, extract, delete, merge files, add page numbers and bookmarks.
-- **Forms**: fill AcroForm fields.
-- **Save and export**: flattened copies, smaller copies, password-protected copies.
-  Export to plain text, Markdown, PNG or an annotation summary. Build a PDF from images.
+  Thumbnails, bookmarks, annotation list. Search with match-case and whole-word options.
+  Back/forward history.
+- **Compare**: two PDFs side by side or stacked, with scroll and zoom kept in sync.
+- **Annotate**: highlight, underline, strikeout, pen, marker, text, notes, rectangles, ovals,
+  lines, arrows, polygons, stamps, images and links. Set colour, opacity, thickness, fill and
+  dashed lines. Copy, paste, duplicate and reorder annotations, with full undo.
+- **Fill & sign**: fill forms and create form fields. Keep several signatures and initials,
+  drawn, typed or imported from an image. Add checkmarks, crosses and dates.
+- **Measure**: distance, perimeter and area, at a drawing scale you set.
+- **Redact**: mark areas or every match of a search, as black boxes or white-out. Applying
+  them flattens the marked pages, so the text underneath is actually removed.
+- **Pages**: reorder, rotate, insert (blank, file, images, clipboard), duplicate, delete,
+  crop, trim margins, resize, extract, split and merge. Add page numbers, headers, footers
+  and Bates numbers.
+- **Save and share**: Save As Flattened. Share or mail a copy, as is or flattened. Reduce
+  file size with four quality levels. Protect the document with a password. Recognise text
+  in scans (OCR, on device).
+- **Convert**: export to Word, RTF, HTML, text, Markdown, PNG/JPEG/TIFF or XFDF. Turn Word,
+  RTF, HTML, Markdown, text and image files into PDF.
 
 ## Requirements
 

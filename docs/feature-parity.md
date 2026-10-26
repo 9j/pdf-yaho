@@ -24,41 +24,55 @@ app offers. How Pagecraft implements each feature was decided independently.
 
 ## Status
 
-| Area | PDF Expert command | Pagecraft |
+The second pass went through all 1,700 English UI strings in the bundle's
+`Localizable.strings`, not only the menu titles. That found tools that are not in the menus.
+
+| Area | PDF Expert feature | Pagecraft |
 | --- | --- | --- |
-| Reading | Single Page, Two Pages, Two Pages but First Single | ✅ Layout menu |
-| Reading | Day, Night, Sepia | ✅ Theme menu |
-| Reading | Zoom In/Out, 100%, Fit Width, Fit Page | ✅ |
-| Reading | Thumbnails, Outline, Bookmarks panels | ✅ sidebar tabs |
-| Reading | Find, Find Next/Previous | ✅ search with result list |
-| Reading | Go to Page, First/Last/Next/Previous | ✅ Go menu |
+| Reading | Single, Two Pages, Two Pages with cover, continuous | ✅ |
+| Reading | Day, Night, Sepia themes | ✅ |
+| Reading | Zoom, Fit Width/Page, Go to Page, Back/Forward | ✅ |
+| Reading | Thumbnails, Outline/Bookmarks, Annotations panel | ✅ |
+| Reading | Find, Match Case, Whole Words | ✅ |
+| Reading | Split View / Compare PDFs, Sync Scroll and Zoom, Swap Sides | ✅ |
 | Annotate | Highlight, Underline, Strikeout | ✅ |
-| Annotate | Pen, Eraser | ✅ |
-| Annotate | Text, Note | ✅ double-click to edit |
-| Annotate | Rectangle, Oval, Line, Arrow | ✅ |
-| Annotate | Signature | ✅ drawn, stored on this Mac |
-| Annotate | Annotation Summary, Export Annotation Summary | ✅ Markdown |
-| Annotate | Remove All Annotations | ✅ |
-| Annotate | Move annotations | ✅ drag with Select tool |
-| Annotate | Stamp, Align/Rotate Annotation | ⏳ |
-| Redact | Redact | ✅ mark areas, then Apply flattens those pages |
-| Redact | Find and Redact | ⏳ |
-| Pages | Rotate, Insert Blank Page, Delete, Reorder | ✅ thumbnails support drag |
-| Pages | Insert From File, Extract | ✅ |
-| Pages | Merge Files | ✅ |
-| Pages | Add/Remove Page Numbers | ✅ |
-| Pages | Crop, Split Pages, Page Labels, Bates, Header & Footer | ⏳ |
-| Forms | Fill forms | ✅ AcroForm through PDFKit |
-| Forms | XFA forms, Clear Form | ❌ / ⏳ |
-| File | Save, Save As, Open Recent, tabs | ✅ standard macOS documents |
-| File | Save as Flattened, Reduce File Size, Set Password | ✅ |
-| File | Export to Text, Markdown, Images | ✅ |
-| File | Export to Word, Excel, PowerPoint, HTML, RTF | ⏳ |
-| File | New from Images | ✅ |
-| File | Properties | ✅ title, author, subject, keywords |
-| Edit PDF | Edit existing text and images | ❌ out of scope for PDFKit |
-| Scan | Recognize Text (OCR), Enhance Scan | ⏳ planned with Vision |
-| Compare | Split View, Sync Scroll | ⏳ |
+| Annotate | Pen, Marker, Eraser | ✅ |
+| Annotate | Text, Note, Callout | ✅ text and note · ⏳ callout |
+| Annotate | Rectangle, Oval, Line, Arrow, Double Arrow, Polygon, Polyline | ✅ |
+| Annotate | Colour, Opacity, Thickness, Fill, Dashed/Dotted lines | ✅ |
+| Annotate | Text Stamps, Image Stamps, custom stamps | ✅ |
+| Annotate | Image tool, Link to Page / Link to Web | ✅ |
+| Annotate | Copy, Cut, Paste, Duplicate, Bring to Front, Send to Back | ✅ |
+| Annotate | Author name on annotations | ✅ Settings |
+| Annotate | Export Annotations (XFDF), Annotation Summary | ✅ |
+| Annotate | Squiggly, Sound, Attachment | ❌ PDFKit cannot create these |
+| Fill & Sign | Signatures and initials: draw, type, image; several saved | ✅ |
+| Fill & Sign | Checkmark, Cross, Date | ✅ |
+| Forms | Fill forms, Clear Form | ✅ |
+| Forms | Create Text Field, Checkbox, Radio Button, Drop-down | ✅ |
+| Forms | XFA forms, Form Assistant, Submit to URL | ❌ |
+| Measure | Distance, Perimeter, Area, Scale | ✅ |
+| Redact | Redact area, Black Box or White Out, Apply | ✅ |
+| Redact | Find and Redact | ✅ |
+| Pages | Insert blank / from file / images / clipboard, Duplicate, Delete, Reorder | ✅ |
+| Pages | Rotate, Reverse | ✅ |
+| Pages | Crop (page or all), Clear Margins, Reset Crop | ✅ |
+| Pages | Page Size / Resize with scale to fit | ✅ |
+| Pages | Extract, Split (every N, odd/even, ranges), Merge | ✅ |
+| Pages | Page Numbers, Header and Footer, Bates Numbering | ✅ |
+| Pages | Page Labels (i, ii, iii…) | ❌ PDFKit has no API for writing page labels |
+| File | Save, Save As, Revert, Open Recent, tabs, Welcome window | ✅ |
+| File | Save As Flattened, Export as Flattened | ✅ |
+| File | Share / Mail as Document or as Flattened | ✅ |
+| File | Reduce File Size (Lossless, High, Medium, Low) | ✅ |
+| File | Set, Change and Remove Password on the document | ✅ |
+| File | Export to Word, RTF, HTML, Text, Markdown, PNG/JPEG/TIFF | ✅ |
+| File | Export to Excel, PowerPoint | ❌ |
+| File | Convert Word, ODT, RTF, HTML, Markdown, text and images to PDF | ✅ |
+| File | Properties | ✅ |
+| Scan | Recognize Text (OCR) | ✅ on-device |
+| Scan | Enhance Scan, Remove Distortion | ⏳ |
+| Edit PDF | Edit existing text and images in the page content | ❌ PDFKit cannot edit page content |
 | AI | Copilot, Chat, Summarize, Translate | ❌ not planned. Cloud AI does not fit a free offline app. |
 
-✅ done · ⏳ planned · ❌ not planned
+✅ done · ⏳ planned · ❌ not possible with PDFKit or not planned
