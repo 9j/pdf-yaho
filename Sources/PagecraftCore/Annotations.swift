@@ -15,6 +15,31 @@ public enum Annotations {
         return a
     }
 
+    /// One markup annotation covering several lines: bounds are their union and each line is a
+    /// quadrilateral (relative to the bounds origin), so a multi-line highlight is a single object.
+    public static func markup(_ type: PDFAnnotationSubtype, lines: [CGRect], color: NSColor) -> PDFAnnotation? {
+        guard let first = lines.first else { return nil }
+        let union = lines.dropFirst().reduce(first) { $0.union($1) }
+        let a = markup(type, bounds: union, color: color)
+        a.quadrilateralPoints = lines.flatMap { r in
+            [CGPoint(x: r.minX, y: r.maxY), CGPoint(x: r.maxX, y: r.maxY), CGPoint(x: r.minX, y: r.minY), CGPoint(x: r.maxX, y: r.minY)]
+                .map { NSValue(point: CGPoint(x: $0.x - union.minX, y: $0.y - union.minY)) }
+        }
+        return a
+    }
+
+    /// The line rectangles of a markup annotation in page space (its quadrilaterals, else its bounds).
+    public static func lineRects(of a: PDFAnnotation) -> [CGRect] {
+        let points = (a.quadrilateralPoints ?? []).map { $0.pointValue }
+        guard points.count >= 4, points.count % 4 == 0 else { return [a.bounds] }
+        return stride(from: 0, to: points.count, by: 4).map { i in
+            let quad = points[i..<(i + 4)]
+            let xs = quad.map(\.x), ys = quad.map(\.y)
+            return CGRect(x: xs.min()! + a.bounds.minX, y: ys.min()! + a.bounds.minY,
+                          width: xs.max()! - xs.min()!, height: ys.max()! - ys.min()!)
+        }
+    }
+
     /// Ink paths in PDFKit are relative to the annotation's bounds origin.
     public static func ink(strokes: [[CGPoint]], color: NSColor, lineWidth: CGFloat) -> PDFAnnotation? {
         let all = strokes.flatMap { $0 }
@@ -127,7 +152,8 @@ public enum Annotations {
 
     public static func markedText(_ a: PDFAnnotation, on page: PDFPage) -> String? {
         guard ["Highlight", "Underline", "StrikeOut", "Squiggly"].contains(a.type ?? "") else { return nil }
-        return page.selection(for: a.bounds)?.string?
+        return lineRects(of: a).compactMap { page.selection(for: $0.insetBy(dx: 0, dy: $0.height * 0.2))?.string }
+            .joined(separator: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "\n", with: " ")
     }

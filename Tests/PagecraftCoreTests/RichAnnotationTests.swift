@@ -81,3 +81,17 @@ final class RichAnnotationTests: XCTestCase {
         defaults.removePersistentDomain(forName: "pagecraft-sig-tests")
     }
 }
+
+final class MultiLineMarkupTests: XCTestCase {
+    func testOneHighlightCoversSeveralLines() throws {
+        let doc = PDFOpsTests().makeTextDocument(["First line of text"])
+        let page = try XCTUnwrap(doc.page(at: 0))
+        let lines = [CGRect(x: 72, y: 700, width: 200, height: 20), CGRect(x: 72, y: 676, width: 120, height: 20)]
+        let a = try XCTUnwrap(Annotations.markup(.highlight, lines: lines, color: .yellow))
+        XCTAssertEqual(a.bounds, CGRect(x: 72, y: 676, width: 200, height: 44))
+        XCTAssertEqual(Annotations.lineRects(of: a), lines)
+        page.addAnnotation(a)
+        XCTAssertTrue(Annotations.markedText(a, on: page)?.contains("First line") ?? false)
+        XCTAssertNil(Annotations.markup(.highlight, lines: [], color: .yellow))
+    }
+}
