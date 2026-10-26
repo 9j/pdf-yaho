@@ -97,6 +97,7 @@ struct DocumentView: View {
                 if ProcessInfo.processInfo.environment["PDFYAHO_QA_DEMO"] != nil { editor.placeQADemo() }
                 if let raw = ProcessInfo.processInfo.environment["PDFYAHO_QA_SIDEBAR"], let tab = SidebarTab(rawValue: raw) { editor.sidebarTab = tab }
                 if let step = ProcessInfo.processInfo.environment["PDFYAHO_QA_CONTENT"] { editor.runContentQA(step) }
+                if let sheet = ProcessInfo.processInfo.environment["PDFYAHO_QA_SHEET"] { editor.openSheetQA(sheet) }
                 #endif
             }
         }

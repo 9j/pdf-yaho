@@ -69,6 +69,8 @@ struct SignaturePad: View {
             }
         }
         .padding(22)
+        // The drawing canvas has no natural height, which made the sheet as tall as the screen allows.
+        .fixedSize()
     }
 
     private var drawPad: some View {

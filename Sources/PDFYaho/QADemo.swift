@@ -91,4 +91,29 @@ extension EditorController {
         }
     }
 }
+
+extension EditorController {
+    /// Opens a sheet by name for screenshots: signature, initials, password, reduce, images, pageSize, split,
+    /// labels, link, findRedact, scale, header, properties.
+    func openSheetQA(_ name: String) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [self] in
+            switch name {
+            case "signature": signaturePadInitials = false; showSignaturePad = true
+            case "initials": signaturePadInitials = true; showSignaturePad = true
+            case "password": showPasswordSheet = true
+            case "reduce": showReduceSize = true
+            case "images": showExportImages = true
+            case "pageSize": showPageSize = true
+            case "split": showSplit = true
+            case "labels": showPageLabels = true
+            case "findRedact": showFindRedact = true
+            case "scale": showMeasureScale = true
+            case "header": headerFooterPreset = .custom
+            case "properties": showProperties = true
+            default: break
+            }
+        }
+    }
+}
 #endif
+
