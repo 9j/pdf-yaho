@@ -103,7 +103,7 @@ right-click it and choose **Open**.
 | `Sources/CPDFium` | Module map for the vendored PDFium headers. |
 | `scripts/build-app.sh` | Builds the `.app` bundle. |
 | `scripts/fetch-pdfium.sh` | Downloads and checks the pinned PDFium into `Vendor/pdfium`. |
-| `scripts/make-icon.swift` | Draws the app icon (`Resources/AppIcon.icns` is built from it). |
+| `scripts/make-icon.sh` | Builds `Resources/AppIcon.icns` from `Resources/AppIcon-source.png`. |
 
 ## Clean-room note
 
