@@ -392,7 +392,23 @@ final class EditorPDFView: PDFView {
             editor.handlePagesKey(event)
             return
         }
-        if editor.mode == .edit, handleContentKey(event, editor: editor, modifiers: modifiers) { return }
+        if editor.mode == .edit {
+            if handleContentKey(event, editor: editor, modifiers: modifiers) { return }
+            // Letters are words being typed here, not tool shortcuts: with a paragraph selected they start
+            // editing it; otherwise they do nothing (G used to open the signature pad).
+            if modifiers.subtracting(.shift).isEmpty, let chars = event.characters, !chars.isEmpty,
+               !chars.trimmingCharacters(in: .whitespaces).isEmpty,
+               chars.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }) {
+                if let block = editor.selectedContent, block.kind == .text, let page = editor.contentPage {
+                    beginContentEditing(block, on: page)
+                    inline?.insertText(chars, replacementRange: inline?.selectedRange() ?? NSRange(location: 0, length: 0))
+                } else {
+                    NSSound.beep()
+                }
+                return
+            }
+            return super.keyDown(with: event)
+        }
         switch event.keyCode {
         case 51, 117 where editor.selected != nil:
             editor.deleteSelected()
