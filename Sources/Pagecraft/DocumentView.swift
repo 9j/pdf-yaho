@@ -121,13 +121,6 @@ struct DocumentView: View {
                 .overlay { DocumentOverlays(editor: editor) }
                 .overlay(alignment: .top) {
                     VStack(spacing: 8) {
-                        if editor.mode.isMarkup {
-                            ToolsetBar(editor: editor)
-                                .transition(.move(edge: .top).combined(with: .opacity))
-                        } else if editor.mode == .scan {
-                            ScanBar(editor: editor)
-                                .transition(.move(edge: .top).combined(with: .opacity))
-                        }
                         if let target = editor.backTarget {
                             BackToPagePill(editor: editor, page: target)
                                 .transition(.move(edge: .top).combined(with: .opacity))
@@ -145,6 +138,19 @@ struct DocumentView: View {
             if editor.mode == .pages {
                 PageGridView(editor: editor)
                     .transition(.opacity)
+            }
+        }
+        // The toolset's tools sit in a bar above the page, so they never cover content.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if editor.mode.isMarkup || editor.mode == .scan {
+                VStack(spacing: 0) {
+                    Group {
+                        if editor.mode == .scan { ScanBar(editor: editor) } else { ToolsetBar(editor: editor) }
+                    }
+                    .background(.bar)
+                    Divider()
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
     }

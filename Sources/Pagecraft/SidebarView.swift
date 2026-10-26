@@ -131,7 +131,6 @@ struct OutlineList: View {
                 }
             }
         }
-        .id(editor.revision)
     }
 
     @ViewBuilder
@@ -335,7 +334,6 @@ struct AnnotationList: View {
                 }
             }
         }
-        .id(editor.revision)
     }
 }
 

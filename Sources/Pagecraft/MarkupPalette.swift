@@ -8,6 +8,15 @@ struct ToolsetBar: View {
     @State private var showStyle = false
 
     var body: some View {
+        ViewThatFits(in: .horizontal) {
+            content
+            content.environment(\.paletteCompact, true)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 4)
+    }
+
+    private var content: some View {
         HStack(spacing: 2) {
             switch editor.mode {
             case .annotate:
@@ -25,9 +34,8 @@ struct ToolsetBar: View {
                 divider
                 group([.pen, .marker])
                 divider
-                group([.rectangle, .oval, .line, .arrow, .doubleArrow])
-                group([.polygon, .polyline])
-                group([.cloud, .cloudPolygon])
+                group([.rectangle, .oval, .line, .arrow])
+                shapeMenu
                 divider
                 group([.eraser])
             case .fillSign:
@@ -39,12 +47,15 @@ struct ToolsetBar: View {
                 stampButton
                 divider
                 formButton
+                divider
+                group([.eraser])
             case .measure:
                 group([.select])
                 divider
                 group([.measureDistance, .measurePerimeter, .measureArea])
                 divider
                 scaleButton
+                group([.eraser])
             case .redact:
                 group([.select, .redact])
                 divider
@@ -65,22 +76,38 @@ struct ToolsetBar: View {
             PaletteButton(symbol: "arrow.uturn.backward", label: "Undo", help: "Undo (⌘Z)", selected: false) {
                 editor.undoManager?.undo()
             }
-            .disabled(!(editor.undoManager?.canUndo ?? false))
+            .disabled(!editor.canUndo)
             PaletteButton(symbol: "arrow.uturn.forward", label: "Redo", help: "Redo (⇧⌘Z)", selected: false) {
                 editor.undoManager?.redo()
             }
-            .disabled(!(editor.undoManager?.canRedo ?? false))
+            .disabled(!editor.canRedo)
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 5)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.separator.opacity(0.6), lineWidth: 0.5))
-        .shadow(color: .black.opacity(0.14), radius: 14, y: 6)
-        .id(editor.revision)
+        .fixedSize()
     }
 
     private var divider: some View {
-        Divider().frame(height: 30).padding(.horizontal, 3)
+        Divider().frame(height: 26).padding(.horizontal, 3)
+    }
+
+    /// Ovals, arrows' variants, polygons and clouds behind one button showing the last one used.
+    private var shapeMenu: some View {
+        let extra: [Tool] = [.doubleArrow, .polygon, .polyline, .cloud, .cloudPolygon]
+        let active = extra.contains(editor.tool)
+        let shown = active ? editor.tool : (extra.contains(editor.lastShape) ? editor.lastShape : .polygon)
+        return Menu {
+            ForEach(extra) { tool in
+                Button { editor.tool = tool } label: { Label(tool.label, systemImage: tool.symbol) }
+            }
+        } label: {
+            PaletteLabel(symbol: shown.symbol, label: active ? shown.label : "More", selected: active, tint: tint(shown), showsChevron: true)
+        } primaryAction: {
+            editor.tool = shown
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("More shapes: double arrow, polygon, polyline, clouds")
     }
 
     private func tint(_ tool: Tool) -> Color? {
@@ -176,7 +203,7 @@ struct ToolsetBar: View {
     }
 
     private var scaleButton: some View {
-        PaletteButton(symbol: "scalemass", label: editor.measureScale.ratio == 1 ? "1:1" : "1:\(editor.measureScale.ratio.formatted())",
+        PaletteButton(symbol: "ruler", label: "Scale",
                       help: "Measurement scale and units (\(editor.measureScale.unit.rawValue))", selected: false) {
             editor.showMeasureScale = true
         }
@@ -189,7 +216,7 @@ struct ToolsetBar: View {
             }
             .pickerStyle(.inline)
         } label: {
-            PaletteLabel(symbol: editor.redactionStyle == .blackout ? "square.fill" : "square", label: editor.redactionStyle == .blackout ? "Black" : "White",
+            PaletteLabel(symbol: editor.redactionStyle == .blackout ? "square.fill" : "square", label: "Mark Style",
                          selected: false, showsChevron: true)
         }
         .menuStyle(.button)
@@ -282,14 +309,11 @@ struct ScanBar: View {
             PaletteButton(symbol: "arrow.uturn.backward", label: "Undo", help: "Undo (⌘Z)", selected: false) {
                 editor.undoManager?.undo()
             }
-            .disabled(!(editor.undoManager?.canUndo ?? false))
+            .disabled(!editor.canUndo)
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 5)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.separator.opacity(0.6), lineWidth: 0.5))
-        .shadow(color: .black.opacity(0.14), radius: 14, y: 6)
-        .id(editor.revision)
+        .fixedSize()
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 4)
     }
 
     private var divider: some View {
@@ -314,6 +338,11 @@ struct PaletteButton: View {
     }
 }
 
+extension EnvironmentValues {
+    /// Icon-only tool buttons when the bar does not fit.
+    @Entry var paletteCompact = false
+}
+
 struct PaletteLabel: View {
     let symbol: String
     let label: String
@@ -322,25 +351,36 @@ struct PaletteLabel: View {
     var showsChevron = false
     @State private var hovering = false
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.paletteCompact) private var compact
 
     var body: some View {
         VStack(spacing: 3) {
             ZStack(alignment: .bottomTrailing) {
-                Image(systemName: symbol)
-                    .font(.system(size: 15, weight: .medium))
-                    .frame(height: 20)
+                HStack(spacing: 1) {
+                    Image(systemName: symbol)
+                        .font(.system(size: 15, weight: .medium))
+                        .frame(height: 20)
+                    if compact, showsChevron { Image(systemName: "chevron.down").font(.system(size: 6, weight: .bold)) }
+                }
                 if let tint, selected {
                     Capsule().fill(tint).frame(width: 10, height: 3).offset(x: 4, y: 4)
                 }
             }
-            HStack(spacing: 1) {
-                Text(label).font(.system(size: 10)).lineLimit(1).minimumScaleFactor(0.7)
-                if showsChevron { Image(systemName: "chevron.down").font(.system(size: 6, weight: .bold)) }
+            if !compact {
+                HStack(spacing: 1) {
+                    Text(label).font(.system(size: 10)).lineLimit(1).fixedSize()
+                    if showsChevron { Image(systemName: "chevron.down").font(.system(size: 6, weight: .bold)) }
+                }
+                .foregroundStyle(selected ? Color.accentColor : .secondary)
             }
-            .foregroundStyle(selected ? Color.accentColor : .secondary)
         }
         .foregroundStyle(selected ? Color.accentColor : .primary)
-        .frame(width: 50, height: 42)
+        .padding(.horizontal, compact ? 4 : 6)
+        .frame(minWidth: compact ? 30 : 50)
+        .frame(height: compact ? 30 : 42)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
+        .accessibilityAddTraits(selected ? .isSelected : [])
         .background {
             RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .fill(selected ? Color.accentColor.opacity(0.14) : hovering ? Color.primary.opacity(0.06) : .clear)
@@ -377,6 +417,9 @@ struct StylePopover: View {
             if editor.textApplies {
                 Divider()
                 TextFormatControls(editor: editor)
+            }
+            if editor.tool == .date, editor.selected == nil {
+                DateFormatPicker()
             }
             if editor.widthApplies {
                 Divider()
@@ -424,6 +467,16 @@ struct StylePopover: View {
         }
         .padding(16)
         .frame(width: 270)
+    }
+}
+
+private struct DateFormatPicker: View {
+    @AppStorage("dateStampFormat") private var format = DateStampFormat.numeric.rawValue
+
+    var body: some View {
+        Picker("Date format", selection: $format) {
+            ForEach(DateStampFormat.allCases) { Text($0.string(from: Date())).tag($0.rawValue) }
+        }
     }
 }
 

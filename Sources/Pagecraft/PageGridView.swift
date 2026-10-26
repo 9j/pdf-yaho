@@ -32,7 +32,6 @@ struct PageGridView: View {
             .padding(.horizontal, 36)
             .padding(.top, 28)
             .padding(.bottom, 110)
-            .id(editor.revision)
         }
         .background(Color(nsColor: NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
             ? NSColor(srgbRed: 0.13, green: 0.13, blue: 0.14, alpha: 1) : NSColor(srgbRed: 0.91, green: 0.91, blue: 0.92, alpha: 1) }))

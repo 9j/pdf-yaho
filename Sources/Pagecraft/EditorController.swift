@@ -274,6 +274,23 @@ struct ToolStyle: Equatable {
     var alignment: NSTextAlignment = .left
 }
 
+/// How the Date tool writes today's date.
+enum DateStampFormat: String, CaseIterable, Identifiable {
+    case numeric = "Numeric", abbreviated = "Abbreviated", long = "Long", iso = "ISO 8601"
+    var id: String { rawValue }
+
+    static var current: DateStampFormat { DateStampFormat(rawValue: UserDefaults.standard.string(forKey: "dateStampFormat") ?? "") ?? .numeric }
+
+    func string(from date: Date) -> String {
+        switch self {
+        case .numeric: date.formatted(date: .numeric, time: .omitted)
+        case .abbreviated: date.formatted(date: .abbreviated, time: .omitted)
+        case .long: date.formatted(date: .long, time: .omitted)
+        case .iso: date.formatted(.iso8601.year().month().day())
+        }
+    }
+}
+
 /// Font families offered for text boxes; nil means the system font.
 enum TextFonts {
     static let families: [String?] = [nil, "Helvetica Neue", "Avenir Next", "Georgia", "Times New Roman", "Baskerville",
@@ -366,7 +383,28 @@ final class EditorController: ObservableObject {
     let file: PDFFile
     var document: PDFDocument { file.pdf }
     weak var pdfView: EditorPDFView?
-    weak var undoManager: UndoManager?
+    weak var undoManager: UndoManager? { didSet { observeUndo() } }
+    @Published private(set) var canUndo = false
+    @Published private(set) var canRedo = false
+    private var undoObservers: [NSObjectProtocol] = []
+
+    private func observeUndo() {
+        let center = NotificationCenter.default
+        undoObservers.forEach(center.removeObserver)
+        undoObservers = []
+        guard let undoManager else { return }
+        let names: [Notification.Name] = [.NSUndoManagerCheckpoint, .NSUndoManagerDidUndoChange, .NSUndoManagerDidRedoChange,
+                                          .NSUndoManagerDidCloseUndoGroup]
+        undoObservers = names.map { name in
+            center.addObserver(forName: name, object: undoManager, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, let manager = self.undoManager else { return }
+                    if self.canUndo != manager.canUndo { self.canUndo = manager.canUndo }
+                    if self.canRedo != manager.canRedo { self.canRedo = manager.canRedo }
+                }
+            }
+        }
+    }
 
     @Published var mode: EditorMode = .read { didSet { modeChanged(from: oldValue) } }
     @Published var tool: Tool = .select { didSet { toolChanged() } }
@@ -1120,7 +1158,7 @@ final class EditorController: ObservableObject {
         switch tool {
         case .checkmark: text = "✓"
         case .cross: text = "✗"
-        default: text = Date().formatted(date: .numeric, time: .omitted)
+        default: text = DateStampFormat.current.string(from: Date())
         }
         let a = Annotations.freeText(text, at: .zero, color: strokeColor(for: tool), fontSize: style.width)
         a.bounds.origin = CGPoint(x: point.x - a.bounds.width / 2, y: point.y - a.bounds.height / 2)
@@ -1291,6 +1329,31 @@ final class EditorController: ObservableObject {
     }
 
     // MARK: Page clipboard and scan clean-up
+
+    /// Keyboard in Pages mode: arrows move the selection, Return opens, Delete removes.
+    func handlePagesKey(_ event: NSEvent) {
+        let shift = event.modifierFlags.contains(.shift)
+        let current = selectedPages.max() ?? currentPageIndex
+        var target: Int?
+        switch event.keyCode {
+        case 123: target = current - 1
+        case 124: target = current + 1
+        case 125: target = current + pagesPerRow
+        case 126: target = current - pagesPerRow
+        case 36, 76:
+            mode = .read
+            DispatchQueue.main.async { self.goToPage(current) }
+            return
+        case 51, 117: deletePages(); return
+        case 53: selectedPages = []; return
+        default: NSSound.beep(); return
+        }
+        guard let target, target >= 0, target < pageCount else { return }
+        if shift { selectedPages.insert(target) } else { selectedPages = [target] }
+    }
+
+    /// Columns in the Pages grid, reported by the grid so arrow keys move by rows.
+    var pagesPerRow = 4
 
     func copyPages() {
         let pages = targetPageIndices.compactMap { document.page(at: $0) }

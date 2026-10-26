@@ -13,6 +13,9 @@ final class EditorPDFView: PDFView {
         case crop(page: PDFPage, start: CGPoint)
     }
 
+    /// Annotation under the pointer when a drawing tool was pressed; a plain click selects it instead of drawing.
+    private var pendingHit: SelectedAnnotation?
+
     /// Vertices placed so far with the Polygon or Polyline tool.
     private var points: (page: PDFPage, list: [CGPoint])?
 
@@ -83,18 +86,28 @@ final class EditorPDFView: PDFView {
         let hovered = page(for: loc, nearest: false)
         if hovered !== editor.hoverPage { editor.hoverPage = hovered }
         if loc.y < 70 { editor.pokeHUD() }
-        if resizeAnchor(at: loc) != nil { NSCursor.crosshair.set(); return }
+        if let (selected, anchor) = resizeAnchor(at: loc) { resizeCursor(for: selected, anchor: anchor).set(); return }
+        if editor.tool != .eraser, editor.mode != .read, let (page, point, _) = pagePoint(event), let a = hit(point, on: page), Annotations.isMovable(a) {
+            NSCursor.openHand.set()
+            return
+        }
         switch editor.tool {
         case .select, .highlight, .underline, .squiggly, .strikeout:
-            if let (page, point, _) = pagePoint(event), editor.tool == .select, let a = hit(point, on: page), Annotations.isMovable(a) {
-                NSCursor.openHand.set()
-                return
-            }
             super.mouseMoved(with: event)
         case .text: NSCursor.iBeam.set()
         case .eraser, .note, .signature, .stamp, .checkmark, .cross, .date: NSCursor.pointingHand.set()
         default: NSCursor.crosshair.set()
         }
+    }
+
+    private func resizeCursor(for selected: SelectedAnnotation, anchor: CGPoint) -> NSCursor {
+        if #available(macOS 15, *) {
+            let b = selected.annotation.bounds
+            let right = anchor.x < b.midX, top = anchor.y < b.midY
+            let position: NSCursor.FrameResizePosition = top ? (right ? .topRight : .topLeft) : (right ? .bottomRight : .bottomLeft)
+            return NSCursor.frameResize(position: position, directions: .all)
+        }
+        return NSCursor.crosshair
     }
 
     // MARK: Mouse
@@ -109,6 +122,18 @@ final class EditorPDFView: PDFView {
             drag = .resize(selected, anchor: anchor, original: selected.annotation.bounds)
             return
         }
+
+        // Clicking an existing annotation selects it whatever the tool, as in Preview.
+        let existing = hit(point, on: page).map { SelectedAnnotation(annotation: $0, page: page) }
+        pendingHit = nil
+        let placesOnClick: Set<Tool> = [.note, .signature, .checkmark, .cross, .date, .stamp]
+        if let existing, placesOnClick.contains(editor.tool) || (editor.tool == .text && existing.annotation.type != "FreeText") {
+            editor.select(existing)
+            if event.clickCount == 2 { editor.beginEditingSelected(); return }
+            if Annotations.isMovable(existing.annotation) { drag = .move(existing, start: point, original: existing.annotation.bounds) }
+            return
+        }
+        if editor.tool != .select, editor.tool != .eraser { pendingHit = existing }
 
         switch editor.tool {
         case .select:
@@ -237,6 +262,11 @@ final class EditorPDFView: PDFView {
             let point = constrained(raw, from: start, event: event)
             let large = abs(point.x - start.x) > 3 || abs(point.y - start.y) > 3
             let rect = CGRect(x: min(start.x, point.x), y: min(start.y, point.y), width: abs(point.x - start.x), height: abs(point.y - start.y))
+            if !large, let pending = pendingHit {
+                editor.select(pending)
+                pendingHit = nil
+                return
+            }
             switch editor.tool {
             case .image:
                 DispatchQueue.main.async { editor.placeImage(in: large ? rect : CGRect(origin: point, size: .zero), on: page) }
@@ -265,7 +295,10 @@ final class EditorPDFView: PDFView {
             }
         case nil:
             super.mouseUp(with: event)
-            guard let selection = currentSelection, !(selection.string ?? "").isEmpty else { return }
+            guard let selection = currentSelection, !(selection.string ?? "").isEmpty else {
+                if let pending = pendingHit { editor.select(pending); pendingHit = nil }
+                return
+            }
             if let type = editor.tool.markupType {
                 editor.applyMarkup(type, to: selection)
             } else if editor.tool == .select {
@@ -324,6 +357,11 @@ final class EditorPDFView: PDFView {
     override func keyDown(with event: NSEvent) {
         guard let editor, inline == nil else { return super.keyDown(with: event) }
         let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        // In Pages mode this view is hidden behind the grid but keeps keyboard focus; act on pages.
+        if editor.mode == .pages {
+            editor.handlePagesKey(event)
+            return
+        }
         switch event.keyCode {
         case 51, 117 where editor.selected != nil:
             editor.deleteSelected()
@@ -354,6 +392,11 @@ final class EditorPDFView: PDFView {
         }
         if modifiers.isEmpty, let key = event.charactersIgnoringModifiers?.lowercased().first,
            let tool = Tool.allCases.first(where: { $0.key == key }) {
+            if editor.mode == .read {
+                // Reading: letters only act on selected text, so a stray key never switches toolsets.
+                if editor.textSelectionActive, tool.markupType != nil { editor.markSelection(with: tool) ; return }
+                return super.keyDown(with: event)
+            }
             editor.tool = tool
             return
         }
@@ -363,26 +406,30 @@ final class EditorPDFView: PDFView {
     // MARK: Clipboard
 
     @objc override func copy(_ sender: Any?) {
+        if editor?.mode == .pages { editor?.copyPages(); return }
         if let editor, editor.selected != nil { editor.copySelectedAnnotation() } else { super.copy(sender) }
     }
 
     @objc func cut(_ sender: Any?) {
+        if editor?.mode == .pages { editor?.cutPages(); return }
         editor?.copySelectedAnnotation(cut: true)
     }
 
     @objc func paste(_ sender: Any?) {
+        if editor?.mode == .pages { editor?.insertFromClipboard(); return }
         if editor?.paste() != true { NSSound.beep() }
     }
 
     @objc func delete(_ sender: Any?) {
+        if editor?.mode == .pages { editor?.deletePages(); return }
         editor?.deleteSelected()
     }
 
     @objc func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {
-        case #selector(cut(_:)), #selector(delete(_:)): return editor?.selected != nil
+        case #selector(cut(_:)), #selector(delete(_:)): return editor?.selected != nil || (editor?.mode == .pages && !(editor?.selectedPages.isEmpty ?? true))
         case #selector(paste(_:)): return editor?.annotationClipboard != nil || NSImage.canInit(with: .general)
-        case #selector(copy(_:)): return editor?.selected != nil || !(currentSelection?.string ?? "").isEmpty
+        case #selector(copy(_:)): return editor?.selected != nil || editor?.mode == .pages || !(currentSelection?.string ?? "").isEmpty
         default: return true
         }
     }
@@ -573,7 +620,7 @@ struct PDFKitView: NSViewRepresentable {
                 : NSColor(srgbRed: 0.91, green: 0.91, blue: 0.92, alpha: 1)
         }
         view.pageShadowsEnabled = true
-        view.pageBreakMargins = NSEdgeInsets(top: 10, left: 0, bottom: 10, right: 0)
+        view.pageBreakMargins = NSEdgeInsets(top: 12, left: 20, bottom: 12, right: 20)
         editor.attach(view)
         return view
     }
