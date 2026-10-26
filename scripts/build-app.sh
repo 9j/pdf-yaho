@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 config="${1:-release}"
 # PDFium powers editing page text and images; without it the app builds with that feature off.
 [ "${NO_PDFIUM:-}" = "1" ] || scripts/fetch-pdfium.sh
-version="0.2.0"
+version="0.3.0"
 arch_flags=""
 for arch in ${ARCHS:-arm64 x86_64}; do arch_flags="$arch_flags --arch $arch"; done
 # shellcheck disable=SC2086
