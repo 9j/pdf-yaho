@@ -3,6 +3,13 @@
 A free, open-source PDF reader and editor for macOS, built on Apple PDFKit.
 No account, no subscription, no telemetry.
 
+**[Download for Mac](https://github.com/9j/pdf-yaho/releases/latest/download/PDF-Yaho.zip)** (macOS 14+, Apple silicon and Intel) · [pdfyaho.chanhee.kr](https://pdfyaho.chanhee.kr)
+
+![PDF Yaho editing a paragraph in place](site/public/img/edit.webp)
+
+The app is not notarized yet. On first launch, open System Settings › Privacy & Security and choose **Open Anyway**,
+or run `xattr -dr com.apple.quarantine "/Applications/PDF Yaho.app"`.
+
 PDF Yaho covers the everyday features of commercial PDF editors such as PDF Expert:
 reading, annotating, signing, redacting, filling forms and rearranging pages.
 [docs/feature-parity.md](docs/feature-parity.md) lists what is done and what is planned.
@@ -102,6 +109,7 @@ right-click it and choose **Open**.
 | `Tests/PDFYahoCoreTests` | XCTest suite for the core. |
 | `Sources/CPDFium` | Module map for the vendored PDFium headers. |
 | `scripts/build-app.sh` | Builds the `.app` bundle. |
+| `site/` | The landing page at pdfyaho.chanhee.kr (static, deployed with Wrangler). |
 | `scripts/fetch-pdfium.sh` | Downloads and checks the pinned PDFium into `Vendor/pdfium`. |
 | `scripts/make-icon.sh` | Builds `Resources/AppIcon.icns` from `Resources/AppIcon-source.png`. |
 

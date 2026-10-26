@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PDF Yaho, 맥에서 쓰는 무료 PDF 편집기</title>
+<meta name="description" content="PDF 원문 글자 고치기, 형광펜과 메모, 서명, 페이지 정리, 워드·엑셀·파워포인트 변환까지. 계정도 광고도 없는 macOS용 오픈소스 PDF 편집기입니다.">
+<meta property="og:title" content="PDF Yaho, 맥에서 쓰는 무료 PDF 편집기">
+<meta property="og:description" content="원문 글자까지 고치는 macOS용 오픈소스 PDF 편집기. 계정도 광고도 없습니다.">
+<meta property="og:image" content="https://pdfyaho.chanhee.kr/img/og.png">
+<meta property="og:url" content="https://pdfyaho.chanhee.kr/">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="/favicon.png">
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/sun-typeface/SUIT@2/fonts/variable/woff2/SUIT-Variable.css">
+<style>
+@font-face {
+  font-family: "Gmarket Sans";
+  src: url("https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_2001@1.1/GmarketSansBold.woff") format("woff");
+  font-weight: 700;
+  font-display: swap;
+}
+:root {
+  --paper: #F5F7FC;
+  --ink: #16204A;
+  --ink-soft: #4A5378;
+  --blue: #2F5BFF;
+  --blue-deep: #1E3FD6;
+  --coral: #FF5A47;
+  --line: #DCE2F2;
+  --display: "Gmarket Sans", "SUIT Variable", sans-serif;
+  --text: "SUIT Variable", -apple-system, "Apple SD Gothic Neo", sans-serif;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--text); font-size: 17px; line-height: 1.7; word-break: keep-all; }
+img { max-width: 100%; height: auto; display: block; }
+a { color: inherit; }
+:focus-visible { outline: 3px solid var(--coral); outline-offset: 3px; border-radius: 6px; }
+.wrap { width: min(1120px, 100% - 48px); margin-inline: auto; }
+
+/* Header */
+.top { display: flex; align-items: center; justify-content: space-between; padding: 22px 0; }
+.mark { display: flex; align-items: center; gap: 10px; font-family: var(--display); font-size: 20px; text-decoration: none; }
+.mark img { width: 36px; height: 36px; }
+.top nav a { font-weight: 600; text-decoration: none; color: var(--ink-soft); }
+.top nav a:hover { color: var(--ink); }
+
+/* Hero: the shout and its echo */
+.hero { padding: 48px 0 0; position: relative; }
+.shout { position: relative; display: flex; align-items: flex-end; gap: clamp(12px, 3vw, 36px); font-family: var(--display); line-height: .9; }
+.shout h1 { margin: 0; font-size: clamp(120px, 24vw, 300px); letter-spacing: -.04em; position: relative; }
+.shout h1 span { position: relative; z-index: 1; }
+.swipe { position: absolute; left: -2%; bottom: 6%; width: 104%; height: 34%; z-index: 0; overflow: visible; }
+.swipe path { stroke: var(--coral); stroke-width: 70; stroke-linecap: round; fill: none; stroke-dasharray: 1100; stroke-dashoffset: 0; }
+.echo { display: flex; flex-direction: column; gap: 6px; padding-bottom: 2%; color: var(--blue); }
+.echo span:nth-child(1) { font-size: clamp(36px, 7vw, 92px); opacity: .55; }
+.echo span:nth-child(2) { font-size: clamp(22px, 3.6vw, 46px); opacity: .32; }
+.echo span:nth-child(3) { font-size: clamp(14px, 2vw, 24px); opacity: .18; }
+@media (prefers-reduced-motion: no-preference) {
+  .swipe path { animation: draw 900ms cubic-bezier(.6, 0, .2, 1) 250ms both; }
+  .echo span { animation: fade 500ms ease-out both; }
+  .echo span:nth-child(1) { animation-delay: 900ms; }
+  .echo span:nth-child(2) { animation-delay: 1150ms; }
+  .echo span:nth-child(3) { animation-delay: 1400ms; }
+}
+@keyframes draw { from { stroke-dashoffset: 1100; } }
+@keyframes fade { from { opacity: 0; } }
+
+.lede { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 32px; align-items: end; margin-top: 36px; }
+.lede > p { margin: 0; font-size: clamp(22px, 2.6vw, 30px); line-height: 1.5; font-weight: 600; max-width: 22em; }
+.actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.button { display: inline-flex; align-items: center; gap: 10px; padding: 15px 24px; border-radius: 999px; font-weight: 700; font-size: 17px; text-decoration: none; }
+.button.primary { background: var(--blue); color: #fff; }
+.button.primary:hover { background: var(--blue-deep); }
+.button.quiet { color: var(--ink); box-shadow: inset 0 0 0 2px var(--line); }
+.button.quiet:hover { box-shadow: inset 0 0 0 2px var(--ink-soft); }
+.fine { margin: 14px 0 0; font-size: 14px; line-height: 1.5; color: var(--ink-soft); text-align: right; max-width: 26em; margin-left: auto; }
+
+.showcase { margin-top: 56px; }
+.showcase img { width: 100%; border-radius: 12px; box-shadow: 0 30px 80px rgba(22, 32, 74, .18), 0 0 0 1px rgba(22, 32, 74, .06); }
+
+/* Features */
+.feature { display: grid; grid-template-columns: 5fr 7fr; gap: clamp(28px, 5vw, 72px); align-items: center; padding: 96px 0 0; }
+.feature:nth-of-type(even) { grid-template-columns: 7fr 5fr; }
+.feature:nth-of-type(even) .copy { order: 2; }
+.feature h2 { font-family: var(--display); font-size: clamp(28px, 3.4vw, 40px); line-height: 1.25; margin: 0 0 14px; letter-spacing: -.01em; }
+.feature p { margin: 0; color: var(--ink-soft); max-width: 30em; }
+.feature figure { margin: 0; }
+.feature figure img { border-radius: 10px; box-shadow: 0 18px 50px rgba(22, 32, 74, .14), 0 0 0 1px rgba(22, 32, 74, .06); }
+
+.more { padding: 104px 0 0; }
+.more h2, .free h2, .install h2 { font-family: var(--display); font-size: clamp(26px, 3vw, 34px); margin: 0 0 22px; }
+.more ul { list-style: none; margin: 0; padding: 0; columns: 2 300px; column-gap: 48px; }
+.more li { break-inside: avoid; padding: 14px 0; border-top: 1px solid var(--line); }
+.more li b { display: block; font-weight: 700; }
+.more li span { color: var(--ink-soft); font-size: 15px; }
+
+.free { margin-top: 104px; padding: 56px clamp(24px, 5vw, 64px); background: var(--blue); color: #fff; border-radius: 28px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 32px; }
+.free p { margin: 0 0 12px; color: rgba(255, 255, 255, .88); }
+.free a { color: #fff; font-weight: 700; }
+
+.install { padding: 104px 0 0; }
+.install ol { margin: 0; padding: 0; list-style: none; counter-reset: step; display: grid; gap: 18px; max-width: 760px; }
+.install li { counter-increment: step; display: grid; grid-template-columns: 44px 1fr; gap: 14px; align-items: start; }
+.install li::before { content: counter(step); font-family: var(--display); font-size: 22px; color: var(--blue); line-height: 1.5; }
+.install code { font-family: ui-monospace, Menlo, monospace; font-size: 14px; background: #E7EBF7; padding: 2px 6px; border-radius: 6px; word-break: break-all; }
+.install .note { margin-top: 20px; color: var(--ink-soft); font-size: 15px; max-width: 760px; }
+
+footer { margin-top: 120px; padding: 32px 0 48px; border-top: 1px solid var(--line); color: var(--ink-soft); font-size: 14px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; }
+
+@media (max-width: 760px) {
+  .lede { grid-template-columns: 1fr; }
+  .fine { text-align: left; }
+  .feature, .feature:nth-of-type(even) { grid-template-columns: 1fr; padding-top: 72px; }
+  .feature:nth-of-type(even) .copy { order: 0; }
+  .free { grid-template-columns: 1fr; }
+  .echo { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="mark" href="/"><img src="/img/icon.png" alt="" width="36" height="36">PDF Yaho</a>
+    <nav><a href="https://github.com/9j/pdf-yaho">GitHub</a></nav>
+  </header>
+
+  <section class="hero" aria-labelledby="hero-title">
+    <div class="shout">
+      <h1 id="hero-title"><svg class="swipe" viewBox="0 0 1000 120" preserveAspectRatio="none" aria-hidden="true"><path d="M30 70 C 260 40, 640 34, 970 58"/></svg><span>야호</span></h1>
+      <div class="echo" aria-hidden="true"><span>야호</span><span>야호</span><span>야호</span></div>
+    </div>
+    <div class="lede">
+      <p>맥에서 쓰는 무료 PDF 편집기입니다. 형광펜과 서명은 물론, 원문 글자까지 고칩니다.</p>
+      <div>
+        <div class="actions">
+          <a class="button primary" href="https://github.com/9j/pdf-yaho/releases/latest/download/PDF-Yaho.zip">맥용 내려받기</a>
+          <a class="button quiet" href="https://github.com/9j/pdf-yaho">코드 보기</a>
+        </div>
+        <p class="fine">버전 0.3.0, 13MB. macOS 14 이상, Apple 실리콘과 Intel 모두 지원</p>
+      </div>
+    </div>
+    <div class="showcase"><img src="/img/edit.webp" width="1440" height="900" alt="PDF Yaho 편집 화면. 워크숍 안내 PDF의 문단을 그 자리에서 고치고 있다."></div>
+  </section>
+
+  <main>
+    <section class="feature">
+      <div class="copy">
+        <h2>원문 글자를 그 자리에서 고칩니다</h2>
+        <p>Edit 탭에서 문단을 누르면 원래 글꼴과 폭 그대로 고칠 수 있습니다. 한글도 됩니다. 사진은 옮기거나 바꾸거나 저장하고, 새 글자와 그림도 넣습니다. 고친 부분 말고는 한 픽셀도 건드리지 않습니다.</p>
+      </div>
+      <figure><img src="/img/edit-crop.webp" width="1160" height="520" loading="lazy" alt="문단을 클릭해 편집 상자가 열린 화면"></figure>
+    </section>
+
+    <section class="feature">
+      <div class="copy">
+        <h2>형광펜, 밑줄, 메모, 말풍선</h2>
+        <p>읽다가 표시하고 싶은 곳에 바로 긋고 적습니다. 도형, 구름 표시, 링크, 도장도 있고, 단 주석은 사이드바에서 모아 봅니다.</p>
+      </div>
+      <figure><img src="/img/annotate-crop.webp" width="820" height="640" loading="lazy" alt="형광펜과 밑줄, 말풍선을 단 문서"></figure>
+    </section>
+
+    <section class="feature">
+      <div class="copy">
+        <h2>빈칸을 채우고 서명까지</h2>
+        <p>신청서 빈칸에 글자를 넣고, 손으로 그리거나 이름을 쳐서 만든 서명을 찍습니다. 서명은 이 맥에만 저장됩니다.</p>
+      </div>
+      <figure><img src="/img/sign-crop.webp" width="900" height="760" loading="lazy" alt="참가 신청서에 이름과 서명을 넣은 화면"></figure>
+    </section>
+
+    <section class="feature">
+      <div class="copy">
+        <h2>페이지는 끌어서 정리</h2>
+        <p>순서 바꾸기, 돌리기, 끼워 넣기, 빼내기, 나누기, 합치기를 큰 썸네일에서 합니다. 쪽 번호와 머리글, 페이지 라벨도 붙입니다.</p>
+      </div>
+      <figure><img src="/img/pages-crop.webp" width="1000" height="520" loading="lazy" alt="네 쪽짜리 문서를 썸네일로 정리하는 화면"></figure>
+    </section>
+
+    <section class="more" aria-labelledby="more-title">
+      <h2 id="more-title">이것도 됩니다</h2>
+      <ul>
+        <li><b>워드, 엑셀, 파워포인트로 내보내기</b><span>표는 엑셀 시트로, 쪽마다 편집 가능한 슬라이드로</span></li>
+        <li><b>스캔본 글자 인식</b><span>사진으로 된 글자를 검색하고 복사할 수 있게</span></li>
+        <li><b>용량 줄이기</b><span>메일로 보내기 좋게 네 단계로</span></li>
+        <li><b>암호 걸기</b><span>열 때 암호를 묻도록</span></li>
+        <li><b>민감한 내용 가리기</b><span>가린 아래 글자까지 지워서</span></li>
+        <li><b>거리와 넓이 재기</b><span>도면 축척에 맞춰</span></li>
+        <li><b>두 문서 나란히 비교</b><span>스크롤과 확대를 맞춰서</span></li>
+        <li><b>여러 파일을 한 PDF로</b><span>워드, 이미지, 웹 페이지도 PDF로 바꿔서</span></li>
+      </ul>
+    </section>
+
+    <section class="free" aria-labelledby="free-title">
+      <h2 id="free-title">왜 무료인가요</h2>
+      <div>
+        <p>매달 구독료를 내지 않아도 PDF를 고칠 수 있으면 좋겠다는 생각으로 만든 오픈소스 앱입니다. MIT 라이선스라 누구나 코드를 보고 고치고 다시 나눌 수 있습니다.</p>
+        <p>계정, 광고, 사용 기록 수집이 없고 인터넷 없이도 동작합니다. 원문 편집에는 구글이 공개한 PDFium을 씁니다.</p>
+        <p><a href="https://github.com/9j/pdf-yaho">GitHub에서 코드와 변경 기록 보기</a></p>
+      </div>
+    </section>
+
+    <section class="install" aria-labelledby="install-title">
+      <h2 id="install-title">설치</h2>
+      <ol>
+        <li><span>위의 <a href="https://github.com/9j/pdf-yaho/releases/latest/download/PDF-Yaho.zip">맥용 내려받기</a>로 받은 zip 파일을 엽니다.</span></li>
+        <li><span>PDF Yaho를 응용 프로그램 폴더로 옮깁니다.</span></li>
+        <li><span>처음 열 때 "확인되지 않은 개발자" 경고가 뜨면 시스템 설정 &gt; 개인정보 보호 및 보안에서 '그래도 열기'를 누릅니다.</span></li>
+      </ol>
+      <p class="note">아직 Apple 공증을 받지 않은 앱이라 3번 과정이 필요합니다. 터미널이 편하면 <code>xattr -dr com.apple.quarantine "/Applications/PDF Yaho.app"</code>를 실행해도 됩니다.</p>
+    </section>
+  </main>
+
+  <footer>
+    <span>PDF Yaho는 MIT 라이선스 오픈소스입니다. PDF Expert, Readdle과는 관계없는 독립 프로젝트입니다.</span>
+    <a href="https://github.com/9j/pdf-yaho/issues">문제 알리기</a>
+  </footer>
+</div>
+</body>
+</html>

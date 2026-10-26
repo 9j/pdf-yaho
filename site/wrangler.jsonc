@@ -1,0 +1,7 @@
+{
+  // Static landing page served from Cloudflare at pdfyaho.chanhee.kr. Deploy with `npx wrangler deploy` in this folder.
+  "name": "pdfyaho",
+  "compatibility_date": "2026-10-01",
+  "assets": { "directory": "./public" },
+  "routes": [{ "pattern": "pdfyaho.chanhee.kr", "custom_domain": true }]
+}
