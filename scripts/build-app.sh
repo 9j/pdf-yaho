@@ -5,6 +5,8 @@ set -eu
 cd "$(dirname "$0")/.."
 
 config="${1:-release}"
+# PDFium powers editing page text and images; without it the app builds with that feature off.
+[ "${NO_PDFIUM:-}" = "1" ] || scripts/fetch-pdfium.sh
 version="0.2.0"
 arch_flags=""
 for arch in ${ARCHS:-arm64 x86_64}; do arch_flags="$arch_flags --arch $arch"; done
@@ -18,6 +20,13 @@ rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$bin" "$app/Contents/MacOS/Pagecraft"
 [ -f Resources/AppIcon.icns ] && cp Resources/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
+if otool -L "$app/Contents/MacOS/Pagecraft" | grep -q libpdfium; then
+    mkdir -p "$app/Contents/Frameworks" "$app/Contents/Resources/Licenses/PDFium"
+    cp Vendor/pdfium/lib/libpdfium.dylib "$app/Contents/Frameworks/"
+    cp Vendor/pdfium/LICENSE Vendor/pdfium/licenses/* "$app/Contents/Resources/Licenses/PDFium/"
+    # Drop the development rpath into Vendor/ so the app only loads its own copy.
+    install_name_tool -delete_rpath "$(pwd)/Vendor/pdfium/lib" "$app/Contents/MacOS/Pagecraft" 2>/dev/null || true
+fi
 
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -52,5 +61,6 @@ cat > "$app/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
+[ -d "$app/Contents/Frameworks" ] && codesign --force --sign - "$app/Contents/Frameworks/libpdfium.dylib"
 codesign --force --sign - "$app"
 echo "Built $app"

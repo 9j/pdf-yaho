@@ -21,6 +21,21 @@ public enum PDFOps {
         return page
     }
 
+    /// A one-page PDF of `page` with its annotations, for engines that work on whole files.
+    public static func singlePageData(_ page: PDFPage) -> Data? {
+        guard let copy = page.copy() as? PDFPage else { return nil }
+        let doc = PDFDocument()
+        doc.insert(copy, at: 0)
+        return doc.dataRepresentation()
+    }
+
+    /// The first page of `data`, ready to put in another document, with Pagecraft's own annotations restored.
+    public static func editablePage(fromPDFData data: Data) -> PDFPage? {
+        guard let page = page(fromPDFData: data) else { return nil }
+        _ = Annotations.restoreCustomAnnotations(on: page)
+        return page
+    }
+
     /// Copies of every page of `doc`, keeping `doc` alive so the copies stay valid.
     public static func adopt(_ doc: PDFDocument) -> [PDFPage] {
         sourcesLock.lock()
