@@ -14,6 +14,8 @@ public struct ContentBlock: Identifiable, Equatable {
     public let text: String
     public let style: TextStyle
     /// Object paths (page object index, then indices inside form objects) of everything the block is made of.
+    /// The first line's baseline (page space), so replacement text sits exactly where the old text did.
+    public let baseline: CGFloat?
     let members: [[Int]]
 }
 
@@ -52,6 +54,9 @@ public struct TextStyle: Equatable, Sendable {
 /// Edits the text and images that make up a page (not annotations), using PDFium.
 /// Every call takes PDF data and returns new PDF data, so the caller owns undo and page swapping.
 public enum ContentEditor {
+    /// Why the last edit was refused, when it was refused for a reason the user should hear.
+    public private(set) static var lastFailure: String?
+
     /// Whether this build includes PDFium (see scripts/fetch-pdfium.sh).
     public static var isAvailable: Bool {
         #if PDFIUM
@@ -67,7 +72,7 @@ public enum ContentEditor {
     /// Lays out `text` with CoreText into a one-page PDF whose page is exactly the text frame (plus `padding`).
     /// CoreGraphics embeds font subsets, so any script and font works. The result is ordinary page text,
     /// so later edits find it the same way as the original text.
-    static func textPDF(_ text: String, style: TextStyle, width: CGFloat?, padding: CGFloat = 2) -> (data: Data, size: CGSize)? {
+    static func textPDF(_ text: String, style: TextStyle, width: CGFloat?, padding: CGFloat = 2) -> (data: Data, size: CGSize, firstBaseline: CGFloat)? {
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = style.alignment
         if let lineHeight = style.lineHeight, lineHeight > 0 {
@@ -92,7 +97,56 @@ public enum ContentEditor {
         CTFrameDraw(frame, ctx)
         ctx.endPDFPage()
         ctx.closePDF()
-        return (data as Data, box.size)
+        var origin = CGPoint.zero
+        if CFArrayGetCount(CTFrameGetLines(frame)) > 0 { CTFrameGetLineOrigins(frame, CFRange(location: 0, length: 1), &origin) }
+        return (data as Data, box.size, padding + origin.y)
+    }
+
+    /// Whether page `index` of `after` renders like `before` outside `changed` (page space), allowing for
+    /// anti-aliasing. Guards against content PDFium cannot write back, which it drops silently.
+    static func looksUnchanged(_ before: Data, _ after: Data, page index: Int, except changed: [CGRect]) -> Bool {
+        guard let a = rasterize(before, page: index), let b = rasterize(after, page: index),
+              a.width == b.width, a.height == b.height
+        else { return false }
+        let excluded = changed.map { $0.insetBy(dx: -4, dy: -4) }
+        var differing = 0, compared = 0
+        a.pixels.withUnsafeBufferPointer { pa in
+            b.pixels.withUnsafeBufferPointer { pb in
+                for row in 0..<a.height {
+                    let y = a.box.minY + (CGFloat(a.height - 1 - row) + 0.5) / a.scale
+                    for col in 0..<a.width {
+                        let x = a.box.minX + (CGFloat(col) + 0.5) / a.scale
+                        if excluded.contains(where: { $0.contains(CGPoint(x: x, y: y)) }) { continue }
+                        compared += 1
+                        let i = (row * a.width + col) * 4
+                        if abs(Int(pa[i]) - Int(pb[i])) > 64 || abs(Int(pa[i + 1]) - Int(pb[i + 1])) > 64
+                            || abs(Int(pa[i + 2]) - Int(pb[i + 2])) > 64 { differing += 1 }
+                    }
+                }
+            }
+        }
+        return differing <= max(24, compared / 2000)
+    }
+
+    private static func rasterize(_ data: Data, page index: Int, maxSide: CGFloat = 800)
+        -> (pixels: [UInt8], width: Int, height: Int, scale: CGFloat, box: CGRect)? {
+        guard let provider = CGDataProvider(data: data as CFData), let doc = CGPDFDocument(provider),
+              let page = doc.page(at: index + 1)
+        else { return nil }
+        let box = page.getBoxRect(.cropBox)
+        let scale = min(maxSide / max(box.width, box.height, 1), 2)
+        let width = max(1, Int(box.width * scale)), height = max(1, Int(box.height * scale))
+        var pixels = [UInt8](repeating: 255, count: width * height * 4)
+        let drawn = pixels.withUnsafeMutableBytes { buffer -> Bool in
+            guard let ctx = CGContext(data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                                      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+            else { return false }
+            ctx.scaleBy(x: scale, y: scale)
+            ctx.translateBy(x: -box.minX, y: -box.minY)
+            ctx.drawPDFPage(page)
+            return true
+        }
+        return drawn ? (pixels, width, height, scale, box) : nil
     }
 
     /// The installed font closest to a PDF font: its own name without the subset tag, then its family and traits.
@@ -142,6 +196,7 @@ extension ContentEditor {
         let size: CGFloat
         let color: NSColor
         let font: FPDF_FONT?
+        var baseline: CGFloat?
     }
 
     // MARK: Reading
@@ -156,17 +211,28 @@ extension ContentEditor {
         let all = leaves(of: page)
         var blocks: [ContentBlock] = []
         if let textPage = FPDFText_LoadPage(page) {
-            let runs = all.filter { $0.type == FPDF_PAGEOBJ_TEXT }.compactMap { run(for: $0, textPage: textPage) }
+            // Where each text object's first character sits on its baseline.
+            var baselines: [FPDF_PAGEOBJECT: CGFloat] = [:]
+            for i in 0..<Int(FPDFText_CountChars(textPage)) {
+                guard let object = FPDFText_GetTextObject(textPage, Int32(i)), baselines[object] == nil else { continue }
+                var x: Double = 0, y: Double = 0
+                if FPDFText_GetCharOrigin(textPage, Int32(i), &x, &y) != 0 { baselines[object] = CGFloat(y) }
+            }
+            let runs = all.filter { $0.type == FPDF_PAGEOBJ_TEXT }.compactMap { leaf -> Run? in
+                var run = run(for: leaf, textPage: textPage)
+                run?.baseline = baselines[leaf.object].map { leaf.parent == nil ? $0 : CGPoint(x: 0, y: $0).applying(leaf.toPage).y }
+                return run
+            }
             FPDFText_ClosePage(textPage)
             blocks += paragraphs(from: runs)
         }
         for leaf in all where leaf.type == FPDF_PAGEOBJ_IMAGE {
             let bounds = leaf.bounds
             guard bounds.width > 2, bounds.height > 2 else { continue }
-            blocks.append(ContentBlock(id: 0, kind: .image, bounds: bounds, text: "", style: TextStyle(), members: [leaf.path]))
+            blocks.append(ContentBlock(id: 0, kind: .image, bounds: bounds, text: "", style: TextStyle(), baseline: nil, members: [leaf.path]))
         }
         return blocks.enumerated().map { i, b in
-            ContentBlock(id: i, kind: b.kind, bounds: b.bounds, text: b.text, style: b.style, members: b.members)
+            ContentBlock(id: i, kind: b.kind, bounds: b.bounds, text: b.text, style: b.style, baseline: b.baseline, members: b.members)
         }
     }
 
@@ -221,23 +287,45 @@ extension ContentEditor {
     /// Groups runs into lines (same baseline, small gaps) and lines into paragraphs (stacked, similar size).
     private static func paragraphs(from runs: [Run]) -> [ContentBlock] {
         struct Line { var runs: [Run]; var bounds: CGRect; var size: CGFloat; var text: String }
-        var lines: [Line] = []
-        for run in runs.sorted(by: { ($0.bounds.midY, -$0.bounds.minX) > ($1.bounds.midY, -$1.bounds.minX) }) {
-            if let i = lines.lastIndex(where: { line in
-                let overlap = min(line.bounds.maxY, run.bounds.maxY) - max(line.bounds.minY, run.bounds.minY)
-                let gap = run.bounds.minX - line.bounds.maxX
-                return overlap > 0.5 * min(line.bounds.height, run.bounds.height)
-                    && gap > -0.5 * line.size && gap < 1.5 * max(line.size, run.size)
-                    && run.size / line.size > 0.6 && run.size / line.size < 1.6
+        // Producers such as browsers and word processors write text in small pieces and in no particular
+        // order, with fallback fonts for other scripts. First gather everything sharing a baseline band…
+        var rows: [[Run]] = []
+        var rowBands: [CGRect] = []
+        for run in runs.sorted(by: { $0.bounds.midY > $1.bounds.midY }) {
+            if let i = rowBands.indices.first(where: { i in
+                let band = rowBands[i]
+                let overlap = min(band.maxY, run.bounds.maxY) - max(band.minY, run.bounds.minY)
+                return overlap > 0.5 * min(band.height, run.bounds.height)
             }) {
-                let gap = run.bounds.minX - lines[i].bounds.maxX
-                let needsSpace = gap > 0.2 * run.size && !lines[i].text.hasSuffix(" ") && !run.text.hasPrefix(" ")
-                lines[i].text += (needsSpace ? " " : "") + run.text
-                lines[i].runs.append(run)
-                lines[i].bounds = lines[i].bounds.union(run.bounds)
+                rows[i].append(run)
+                // Keep the band to the row's first piece so tall fallback glyphs don't swallow the next line.
             } else {
-                lines.append(Line(runs: [run], bounds: run.bounds, size: run.size, text: run.text))
+                rows.append([run])
+                rowBands.append(run.bounds)
             }
+        }
+        // …then read each row left to right, splitting it where a wide gap separates columns or table cells.
+        var lines: [Line] = []
+        for row in rows {
+            var current: Line?
+            for run in row.sorted(by: { $0.bounds.minX < $1.bounds.minX }) {
+                if var line = current {
+                    let gap = run.bounds.minX - line.bounds.maxX
+                    let size = max(line.size, run.size)
+                    if gap < 2 * size, run.size / line.size > 0.5, run.size / line.size < 2 {
+                        let needsSpace = gap > 0.22 * run.size && !line.text.hasSuffix(" ") && !run.text.hasPrefix(" ")
+                        line.text += (needsSpace ? " " : "") + run.text
+                        line.runs.append(run)
+                        line.bounds = line.bounds.union(run.bounds)
+                        line.size = max(line.size, run.size)
+                        current = line
+                        continue
+                    }
+                    lines.append(line)
+                }
+                current = Line(runs: [run], bounds: run.bounds, size: run.size, text: run.text)
+            }
+            if let line = current { lines.append(line) }
         }
 
         var groups: [[Line]] = []
@@ -248,7 +336,8 @@ extension ContentEditor {
                 let width = group.map(\.bounds).reduce(CGRect.null) { $0.union($1) }
                 return gap > -0.3 * line.size && gap < 0.9 * line.size
                     && line.bounds.minX < width.maxX && line.bounds.maxX > width.minX
-                    && line.size / last.size > 0.8 && line.size / last.size < 1.25
+                    && abs(line.bounds.minX - width.minX) < 3 * line.size
+                    && line.size / last.size > 0.75 && line.size / last.size < 1.33
             }) {
                 groups[i].append(line)
             } else {
@@ -260,12 +349,18 @@ extension ContentEditor {
             let bounds = group.map(\.bounds).reduce(CGRect.null) { $0.union($1) }
             var text = ""
             for (i, line) in group.enumerated() {
-                let body = line.text.trimmingCharacters(in: .whitespaces)
+                let body = line.text.replacingOccurrences(of: #"\s{2,}"#, with: " ", options: .regularExpression).trimmingCharacters(in: .whitespaces)
                 if i > 0 {
                     // A line that stops well short of the paragraph's right edge ended with a real line break.
+                    // A soft wrap leaves too little room for the next line's first word; more room means a real break.
                     let previous = group[i - 1]
-                    let hardBreak = previous.bounds.maxX < bounds.maxX - 3 * previous.size
-                    if text.hasSuffix("-"), !hardBreak { text.removeLast() } else { text += hardBreak ? "\n" : " " }
+                    let charWidth = line.bounds.width / CGFloat(max(line.text.count, 1))
+                    let firstWord = CGFloat(body.prefix { $0 != " " }.count + 1) * charWidth
+                    let hardBreak = bounds.maxX - previous.bounds.maxX > firstWord + previous.size
+                    // Korean, Chinese and Japanese can wrap inside a word: a full line ending and starting in those
+                    // scripts joins without a space.
+                    let midWord = !hardBreak && isCJK(text.last) && isCJK(body.first) && bounds.maxX - previous.bounds.maxX < charWidth * 1.5
+                    if text.hasSuffix("-"), !hardBreak { text.removeLast() } else if !midWord { text += hardBreak ? "\n" : " " }
                 }
                 text += body
             }
@@ -280,9 +375,15 @@ extension ContentEditor {
             let pitch = group.count > 1 ? (group[0].bounds.minY - group[group.count - 1].bounds.minY) / CGFloat(group.count - 1) : nil
             let style = TextStyle(fontName: font, fontSize: size, color: first.color,
                                   alignment: .left, lineHeight: pitch.map { max($0, size) })
-            return ContentBlock(id: 0, kind: .text, bounds: bounds, text: text, style: style,
+            let baseline = group[0].runs.compactMap(\.baseline).max()
+            return ContentBlock(id: 0, kind: .text, bounds: bounds, text: text, style: style, baseline: baseline,
                                 members: group.flatMap { $0.runs.map(\.leaf.path) })
         }
+    }
+
+    private static func isCJK(_ c: Character?) -> Bool {
+        guard let v = c?.unicodeScalars.first?.value else { return false }
+        return (0xAC00...0xD7A3).contains(v) || (0x3040...0x30FF).contains(v) || (0x4E00...0x9FFF).contains(v) || (0x1100...0x11FF).contains(v)
     }
 
     private static func fontName(of font: FPDF_FONT?) -> String {
@@ -310,14 +411,36 @@ extension ContentEditor {
 
     // MARK: Editing
 
-    /// Opens `data`, runs `edit` on page `index`, regenerates the content stream and saves.
-    private static func editing(_ data: Data, page index: Int, _ edit: (PDFiumDocument, FPDF_PAGE) -> Bool) -> Data? {
+    /// Opens `data`, runs `edit` on page `index`, regenerates the content stream and saves. `edit` returns the
+    /// page areas it changes (nil on failure); if anything outside them looks different afterwards, the edit is refused.
+    private static func editing(_ data: Data, page index: Int, onlyAdds: Bool = false,
+                                _ edit: (PDFiumDocument, FPDF_PAGE) -> [CGRect]?) -> Data? {
+        lastFailure = nil
         guard let doc = PDFiumDocument(data: data) else { return nil }
+        var changed: [CGRect] = []
         let ok = doc.withPage(index) { page -> Bool in
-            guard edit(doc, page) else { return false }
+            guard let areas = edit(doc, page) else { return false }
+            changed = areas
+            // Touching existing objects would make PDFium rewrite their stream; when only adding, leave them be.
+            if !onlyAdds { pinColors(on: page) }
             return FPDFPage_GenerateContent(page) != 0
         } ?? false
-        return ok ? doc.save() : nil
+        guard ok, let result = doc.save() else { return nil }
+        guard looksUnchanged(data, result, page: index, except: changed) else {
+            lastFailure = "This page has artwork that can't be rewritten safely, such as gradients, so the edit was cancelled."
+            return nil
+        }
+        return result
+    }
+
+    /// PDFium only writes colours back for device colour spaces, so anything in an ICC-based space (as browsers
+    /// and CoreGraphics write sRGB) would turn black when the page is regenerated. Restate each colour as plain RGB.
+    private static func pinColors(on page: FPDF_PAGE) {
+        for leaf in leaves(of: page) where leaf.type == FPDF_PAGEOBJ_PATH || leaf.type == FPDF_PAGEOBJ_TEXT {
+            var r: UInt32 = 0, g: UInt32 = 0, b: UInt32 = 0, a: UInt32 = 0
+            if FPDFPageObj_GetFillColor(leaf.object, &r, &g, &b, &a) != 0 { FPDFPageObj_SetFillColor(leaf.object, r, g, b, a) }
+            if FPDFPageObj_GetStrokeColor(leaf.object, &r, &g, &b, &a) != 0 { FPDFPageObj_SetStrokeColor(leaf.object, r, g, b, a) }
+        }
     }
 
     private static func resolve(_ blocks: [ContentBlock], on page: FPDF_PAGE) -> [Leaf] {
@@ -332,11 +455,44 @@ extension ContentEditor {
         return true
     }
 
+    /// Removes text blocks, or removes or moves image blocks, by editing only their operators in the page's
+    /// content stream. Returns nil when that is not possible (for example, content inside form XObjects),
+    /// so the caller can fall back to letting PDFium regenerate the page.
+    private static func surgery(removing blocks: [ContentBlock], movingImageBy move: CGAffineTransform? = nil, of data: Data) -> Data? {
+        guard let census = ContentSurgery.census(of: data), let doc = PDFiumDocument(data: data) else { return nil }
+        let targets = Set(blocks.flatMap(\.members))
+        var textEdits: [Int: ContentSurgery.Edit] = [:], imageEdits: [Int: ContentSurgery.Edit] = [:]
+        let mapped = doc.withPage(0) { page -> Bool in
+            var counts = ContentSurgery.Census()
+            for i in 0..<Int(FPDFPage_CountObjects(page)) {
+                guard let object = FPDFPage_GetObject(page, Int32(i)) else { continue }
+                let type = FPDFPageObj_GetType(object)
+                if type == FPDF_PAGEOBJ_TEXT {
+                    if targets.contains([i]) { textEdits[counts.text] = .remove }
+                    counts.text += 1
+                } else if type == FPDF_PAGEOBJ_IMAGE {
+                    if targets.contains([i]) {
+                        imageEdits[counts.images] = move.map { .transform($0, imageMatrix: matrix(of: object)) } ?? .remove
+                    }
+                    counts.images += 1
+                }
+            }
+            // Only when PDFium's objects line up one-to-one with the stream's operators is the mapping trusted.
+            return counts == census && textEdits.count + imageEdits.count == targets.count
+        } ?? false
+        guard mapped, let result = ContentSurgery.apply(text: textEdits, images: imageEdits, to: data),
+              ContentSurgery.census(of: result).map({ $0.text == census.text - (move == nil ? textEdits.count : 0) }) == true
+        else { return nil }
+        let changed = blocks.map(\.bounds) + blocks.compactMap { b in move.map { b.bounds.applying($0) } }
+        return looksUnchanged(data, result, page: 0, except: changed) ? result : nil
+    }
+
     /// Deletes blocks from the page.
     public static func remove(_ blocks: [ContentBlock], inPage index: Int = 0, of data: Data) -> Data? {
-        editing(data, page: index) { _, page in
+        if index == 0, let result = surgery(removing: blocks, of: data) { return result }
+        return editing(data, page: index) { _, page in
             let targets = resolve(blocks, on: page)
-            return !targets.isEmpty && targets.allSatisfy { detach($0, from: page) }
+            return !targets.isEmpty && targets.allSatisfy({ detach($0, from: page) }) ? blocks.map(\.bounds) : nil
         }
     }
 
@@ -349,6 +505,17 @@ extension ContentEditor {
         let t = CGAffineTransform(translationX: -old.minX, y: -old.minY)
             .concatenating(CGAffineTransform(scaleX: sx, y: sy))
             .concatenating(CGAffineTransform(translationX: newBounds.minX, y: newBounds.minY))
+        if index == 0 {
+            if block.kind == .image, let result = surgery(removing: [block], movingImageBy: t, of: data) { return result }
+            // Text is set again at the new place, since moving its operators would mean rewriting the whole stream.
+            if block.kind == .text, let stripped = surgery(removing: [block], of: data) {
+                return editing(stripped, page: 0, onlyAdds: true) { doc, page in
+                    insertText(block.text, style: block.style, topLeft: CGPoint(x: newBounds.minX, y: newBounds.maxY),
+                               width: wrapWidth(of: block).map { _ in newBounds.width + 2 },
+                               baseline: block.baseline.map { $0 + newBounds.maxY - old.maxY }, doc: doc, page: page).map { [newBounds, $0] }
+                }
+            }
+        }
         return editing(data, page: index) { _, page in
             let targets = resolve([block], on: page)
             for leaf in targets {
@@ -358,7 +525,7 @@ extension ContentEditor {
                 FPDFPageObj_TransformF(leaf.object, &m)
                 if let parent = leaf.parent { markDirty(parent) }
             }
-            return !targets.isEmpty
+            return targets.isEmpty ? nil : [old, newBounds]
         }
     }
 
@@ -368,53 +535,73 @@ extension ContentEditor {
         FPDFPageObj_TransformF(form, &identity)
     }
 
+    /// Paragraphs rewrap at their width; a single line grows to fit, as a label or heading would.
+    public static func wrapWidth(of block: ContentBlock) -> CGFloat? {
+        block.style.lineHeight == nil ? nil : block.bounds.width + 2
+    }
+
     /// Replaces a text block with `text` laid out in `style`, keeping its top-left corner and width.
     public static func replaceText(of block: ContentBlock, with text: String, style: TextStyle, width: CGFloat? = nil,
                                    inPage index: Int = 0, of data: Data) -> Data? {
         let topLeft = CGPoint(x: block.bounds.minX, y: block.bounds.maxY)
+        if index == 0, let stripped = surgery(removing: [block], of: data) {
+            if text.isEmpty { return stripped }
+            return editing(stripped, page: 0, onlyAdds: true) { doc, page in
+                insertText(text, style: style, topLeft: topLeft, width: width ?? wrapWidth(of: block), baseline: block.baseline, doc: doc, page: page).map { [$0] }
+            }
+        }
         return editing(data, page: index) { doc, page in
             let targets = resolve([block], on: page)
-            guard !targets.isEmpty, targets.allSatisfy({ detach($0, from: page) }) else { return false }
-            if text.isEmpty { return true }
-            return insertText(text, style: style, topLeft: topLeft, width: width ?? block.bounds.width + 2, doc: doc, page: page)
+            guard !targets.isEmpty, targets.allSatisfy({ detach($0, from: page) }) else { return nil }
+            if text.isEmpty { return [block.bounds] }
+            return insertText(text, style: style, topLeft: topLeft, width: width ?? wrapWidth(of: block), baseline: block.baseline, doc: doc, page: page)
+                .map { [block.bounds, $0] }
         }
     }
 
     /// Adds new text with its top-left corner at `topLeft`. With no width, lines only break at newlines.
     public static func addText(_ text: String, style: TextStyle, at topLeft: CGPoint, width: CGFloat? = nil,
                                inPage index: Int = 0, of data: Data) -> Data? {
-        editing(data, page: index) { doc, page in
-            insertText(text, style: style, topLeft: topLeft, width: width, doc: doc, page: page)
+        editing(data, page: index, onlyAdds: true) { doc, page in
+            insertText(text, style: style, topLeft: topLeft, width: width, doc: doc, page: page).map { [$0] }
         }
     }
 
-    private static func insertText(_ text: String, style: TextStyle, topLeft: CGPoint, width: CGFloat?,
-                                   doc: PDFiumDocument, page: FPDF_PAGE) -> Bool {
+    /// Places laid-out text on the page and returns the area it covers.
+    private static func insertText(_ text: String, style: TextStyle, topLeft: CGPoint, width: CGFloat?, baseline: CGFloat? = nil,
+                                   doc: PDFiumDocument, page: FPDF_PAGE) -> CGRect? {
         let padding: CGFloat = 2
         guard let laid = textPDF(text, style: style, width: width, padding: padding),
               let source = PDFiumDocument(data: laid.data),
               let xobject = FPDF_NewXObjectFromPage(doc.handle, source.handle, 0)
-        else { return false }
+        else { return nil }
         defer { FPDF_CloseXObject(xobject) }
-        guard let form = FPDF_NewFormObjectFromXObject(xobject) else { return false }
-        var m = FS_MATRIX(a: 1, b: 0, c: 0, d: 1, e: Float(topLeft.x - padding), f: Float(topLeft.y - laid.size.height + padding))
+        guard let form = FPDF_NewFormObjectFromXObject(xobject) else { return nil }
+        let origin = CGPoint(x: topLeft.x - padding,
+                             y: baseline.map { $0 - laid.firstBaseline } ?? topLeft.y - laid.size.height + padding)
+        var m = FS_MATRIX(a: 1, b: 0, c: 0, d: 1, e: Float(origin.x), f: Float(origin.y))
         FPDFPageObj_TransformF(form, &m)
         FPDFPage_InsertObject(page, form)
-        return true
+        return CGRect(origin: origin, size: laid.size)
     }
 
     /// Replaces an image, fitting the new one inside the old bounds without distorting it.
     public static func replaceImage(of block: ContentBlock, with image: CGImage, inPage index: Int = 0, of data: Data) -> Data? {
-        editing(data, page: index) { doc, page in
-            guard let leaf = resolve([block], on: page).first else { return false }
-            guard detach(leaf, from: page) else { return false }
-            return insertImage(image, in: aspectFit(image, in: block.bounds), doc: doc, page: page)
+        let target = aspectFit(image, in: block.bounds)
+        if index == 0, let stripped = surgery(removing: [block], of: data) {
+            return editing(stripped, page: 0, onlyAdds: true) { doc, page in insertImage(image, in: target, doc: doc, page: page) ? [target] : nil }
+        }
+        return editing(data, page: index) { doc, page in
+            guard let leaf = resolve([block], on: page).first, detach(leaf, from: page),
+                  insertImage(image, in: aspectFit(image, in: block.bounds), doc: doc, page: page)
+            else { return nil }
+            return [block.bounds]
         }
     }
 
     /// Adds an image as page content (not an annotation) filling `rect`.
     public static func addImage(_ image: CGImage, in rect: CGRect, inPage index: Int = 0, of data: Data) -> Data? {
-        editing(data, page: index) { doc, page in insertImage(image, in: rect, doc: doc, page: page) }
+        editing(data, page: index, onlyAdds: true) { doc, page in insertImage(image, in: rect, doc: doc, page: page) ? [rect] : nil }
     }
 
     private static func insertImage(_ image: CGImage, in rect: CGRect, doc: PDFiumDocument, page: FPDF_PAGE) -> Bool {

@@ -52,6 +52,31 @@ final class ContentEditorTests: XCTestCase {
         XCTAssertEqual(image.bounds.width, 100, accuracy: 1)
     }
 
+    /// Browsers and word processors write words as separate pieces, out of order, with fallback fonts
+    /// for other scripts; they still read as one paragraph in reading order.
+    func testScatteredPiecesBecomeOneParagraph() throws {
+        let data = NSMutableData()
+        var box = CGRect(x: 0, y: 0, width: 612, height: 792)
+        let ctx = CGContext(consumer: CGDataConsumer(data: data as CFMutableData)!, mediaBox: &box, nil)!
+        ctx.beginPDFPage(nil)
+        let latin = NSFont.systemFont(ofSize: 13), hangul = NSFont(name: "AppleSDGothicNeo-Regular", size: 13)!
+        // (text, x, line) drawn deliberately out of order.
+        let pieces: [(String, CGFloat, Int, NSFont)] = [
+            ("PDF입니다.", 172, 0, hangul), ("이 문서는", 72, 0, hangul), ("일반", 140, 0, hangul),
+            ("English", 150, 1, latin), ("두 번째 줄과", 72, 1, hangul), ("text.", 205, 1, latin),
+        ]
+        for (text, x, line, font) in pieces {
+            let ctLine = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: [.font: font]))
+            ctx.textPosition = CGPoint(x: x, y: 700 - CGFloat(line) * 17)
+            CTLineDraw(ctLine, ctx)
+        }
+        ctx.endPDFPage()
+        ctx.closePDF()
+        let blocks = ContentEditor.blocks(of: data as Data).filter { $0.kind == .text }
+        XCTAssertEqual(blocks.count, 1, "\(blocks.map(\.text))")
+        XCTAssertEqual(blocks.first?.text.replacingOccurrences(of: "\n", with: " "), "이 문서는 일반 PDF입니다. 두 번째 줄과 English text.")
+    }
+
     func testReplaceTextWithAnyScriptAndEditAgain() throws {
         let page = samplePage()
         let body = try XCTUnwrap(ContentEditor.blocks(of: page).first { $0.text.hasPrefix("The quick") })
@@ -87,7 +112,8 @@ final class ContentEditorTests: XCTestCase {
         let moved = try XCTUnwrap(ContentEditor.move(heading, to: target, of: page))
         let movedHeading = try XCTUnwrap(ContentEditor.blocks(of: moved).first { $0.text == "Quarterly Report" })
         XCTAssertEqual(movedHeading.bounds.minX, target.minX, accuracy: 1)
-        XCTAssertEqual(movedHeading.bounds.minY, target.minY, accuracy: 1)
+        // Moved text is set again, so its top edge (not its exact glyph box) lands on the target.
+        XCTAssertEqual(movedHeading.bounds.maxY, target.maxY, accuracy: 4)
 
         let added = try XCTUnwrap(ContentEditor.addText("Approved", style: TextStyle(fontSize: 18, color: .systemGreen), at: CGPoint(x: 400, y: 750), of: page))
         let stamp = try XCTUnwrap(ContentEditor.blocks(of: added).first { $0.text.contains("Approved") })
@@ -147,6 +173,87 @@ final class ContentEditorTests: XCTestCase {
         XCTAssertTrue(result.annotations.contains { $0.type == "Text" && $0.contents == "Check this" })
         XCTAssertTrue(result.annotations.contains { $0 is CalloutAnnotation })
         XCTAssertTrue((result.string ?? "").contains("Annual Report"))
+    }
+
+    /// Regenerating the page must not change anything outside the edited paragraph: colours in ICC-based
+    /// spaces (as browsers and CoreGraphics write sRGB), strokes, gradients and images.
+    func testEditLeavesTheRestOfThePageUnchanged() throws {
+        let data = NSMutableData()
+        var box = CGRect(x: 0, y: 0, width: 300, height: 300)
+        let ctx = CGContext(consumer: CGDataConsumer(data: data as CFMutableData)!, mediaBox: &box, nil)!
+        ctx.beginPDFPage(nil)
+        let srgb = CGColorSpace(name: CGColorSpace.sRGB)!
+        ctx.setFillColor(CGColor(colorSpace: srgb, components: [1, 1, 0.9, 1])!)
+        ctx.fill(box)
+        ctx.setFillColor(CGColor(colorSpace: srgb, components: [0.1, 0.5, 0.9, 1])!)
+        ctx.fill(CGRect(x: 20, y: 20, width: 80, height: 60))
+        ctx.setStrokeColor(CGColor(colorSpace: srgb, components: [0.9, 0.2, 0.2, 1])!)
+        ctx.setLineWidth(3)
+        ctx.stroke(CGRect(x: 120, y: 20, width: 80, height: 60))
+        let gradient = CGGradient(colorsSpace: srgb, colors: [CGColor(colorSpace: srgb, components: [0, 0.8, 0.3, 1])!,
+                                                             CGColor(colorSpace: srgb, components: [0.6, 0, 0.8, 1])!] as CFArray, locations: nil)!
+        ctx.saveGState()
+        ctx.clip(to: CGRect(x: 220, y: 20, width: 60, height: 60))
+        ctx.drawLinearGradient(gradient, start: CGPoint(x: 220, y: 20), end: CGPoint(x: 280, y: 80), options: [])
+        ctx.restoreGState()
+        ctx.draw(Self.square(.orange), in: CGRect(x: 20, y: 100, width: 50, height: 50))
+        let line = CTLineCreateWithAttributedString(NSAttributedString(string: "Edit me", attributes: [.font: NSFont.systemFont(ofSize: 18),
+                                                                                                    .foregroundColor: NSColor.systemPurple]))
+        ctx.textPosition = CGPoint(x: 120, y: 220)
+        CTLineDraw(line, ctx)
+        ctx.endPDFPage()
+        ctx.closePDF()
+
+        // Only the edited paragraph's operators change, so the gradient, colours and image are untouched.
+        let block = try XCTUnwrap(ContentEditor.blocks(of: data as Data).first { $0.text == "Edit me" })
+        let edited = try XCTUnwrap(ContentEditor.replaceText(of: block, with: "Done", style: block.style, of: data as Data))
+        XCTAssertTrue(PDFDocument(data: edited)?.page(at: 0)?.string?.contains("Done") == true)
+        let before = try XCTUnwrap(Self.render(data as Data)), after = try XCTUnwrap(Self.render(edited))
+        let changed = block.bounds.insetBy(dx: -6, dy: -10)
+        var differing = 0
+        for y in 0..<300 {
+            for x in 0..<300 where !changed.contains(CGPoint(x: x, y: y)) {
+                let i = ((299 - y) * 300 + x) * 4
+                if (0..<3).contains(where: { abs(Int(before[i + $0]) - Int(after[i + $0])) > 24 }) { differing += 1 }
+            }
+        }
+        XCTAssertEqual(differing, 0, "pixels outside the edited paragraph changed")
+    }
+
+    /// Kerning and character spacing (as word processors and browsers write) survive edits elsewhere on the page.
+    func testUntouchedTextKeepsItsSpacing() throws {
+        let data = NSMutableData()
+        var box = CGRect(x: 0, y: 0, width: 400, height: 200)
+        let ctx = CGContext(consumer: CGDataConsumer(data: data as CFMutableData)!, mediaBox: &box, nil)!
+        ctx.beginPDFPage(nil)
+        // The system font's tracking makes CoreGraphics write character spacing (Tc) and TJ kerning.
+        for (text, y) in [("Quarterly Report", 150.0), ("delete me", 50.0)] {
+            let line = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: [.font: NSFont.boldSystemFont(ofSize: 24)]))
+            ctx.textPosition = CGPoint(x: 20, y: y)
+            CTLineDraw(line, ctx)
+        }
+        ctx.endPDFPage()
+        ctx.closePDF()
+        let target = try XCTUnwrap(ContentEditor.blocks(of: data as Data).first { $0.text == "delete me" })
+        let removed = try XCTUnwrap(ContentEditor.remove([target], of: data as Data))
+        XCTAssertTrue(ContentEditor.looksUnchanged(data as Data, removed, page: 0, except: [target.bounds]))
+        XCTAssertFalse(PDFDocument(data: removed)?.page(at: 0)?.string?.contains("delete") ?? true)
+    }
+
+    /// RGBA pixels of page 0 at 1 pt per pixel, bottom row first.
+    static func render(_ data: Data) -> [UInt8]? {
+        guard let doc = PDFDocument(data: data), let page = doc.page(at: 0) else { return nil }
+        var pixels = [UInt8](repeating: 0, count: 300 * 300 * 4)
+        let ok = pixels.withUnsafeMutableBytes { buffer -> Bool in
+            guard let ctx = CGContext(data: buffer.baseAddress, width: 300, height: 300, bitsPerComponent: 8, bytesPerRow: 1200,
+                                      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+            else { return false }
+            ctx.setFillColor(.white)
+            ctx.fill(CGRect(x: 0, y: 0, width: 300, height: 300))
+            page.draw(with: .mediaBox, to: ctx)
+            return true
+        }
+        return ok ? pixels : nil
     }
 
     func testTextFreeRendering() throws {

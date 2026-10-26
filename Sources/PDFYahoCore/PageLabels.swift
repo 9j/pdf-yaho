@@ -184,17 +184,17 @@ public enum PageLabels {
     }
 
     /// The byte range of the dictionary of the last definition of object `n g`.
-    private static func object(_ n: Int, _ g: Int, in bytes: [UInt8]) -> Range<Int>? {
+    static func object(_ n: Int, _ g: Int, in bytes: [UInt8]) -> Range<Int>? {
         guard let header = find(Array("\(n) \(g) obj".utf8), in: bytes, from: bytes.count, backwards: true) else { return nil }
         return dictionary(in: bytes, at: header)
     }
 
     /// PDF syntax is bytes; Latin-1 maps them one-to-one so binary strings survive the round trip.
-    private static func latin1(_ bytes: ArraySlice<UInt8>) -> String { String(bytes.map { Character(UnicodeScalar($0)) }) }
+    static func latin1(_ bytes: ArraySlice<UInt8>) -> String { String(bytes.map { Character(UnicodeScalar($0)) }) }
 
     // MARK: - Minimal PDF lexing
 
-    private static func lastStartXref(in bytes: [UInt8]) -> Int? {
+    static func lastStartXref(in bytes: [UInt8]) -> Int? {
         guard let at = find(Array("startxref".utf8), in: bytes, from: bytes.count, backwards: true) else { return nil }
         var i = at + 9
         while i < bytes.count, isWhitespace(bytes[i]) { i += 1 }
@@ -203,7 +203,7 @@ public enum PageLabels {
         return digits > 0 ? n : nil
     }
 
-    private static func find(_ needle: [UInt8], in bytes: [UInt8], from: Int, backwards: Bool) -> Int? {
+    static func find(_ needle: [UInt8], in bytes: [UInt8], from: Int, backwards: Bool) -> Int? {
         guard !needle.isEmpty, bytes.count >= needle.count else { return nil }
         let last = bytes.count - needle.count
         var i = backwards ? min(from, last) : max(0, from)
@@ -219,7 +219,7 @@ public enum PageLabels {
     }
 
     /// The byte range of the first `<< … >>` at or after `start`, delimiters included.
-    private static func dictionary(in bytes: [UInt8], at start: Int) -> Range<Int>? {
+    static func dictionary(in bytes: [UInt8], at start: Int) -> Range<Int>? {
         var i = start
         while i + 1 < bytes.count, !(bytes[i] == 0x3C && bytes[i + 1] == 0x3C) { i += 1 }
         guard i + 1 < bytes.count else { return nil }
@@ -251,7 +251,7 @@ public enum PageLabels {
 
     private static func isWhitespace(_ c: UInt8) -> Bool { c == 0x20 || c == 0x0A || c == 0x0D || c == 0x09 || c == 0x0C || c == 0x00 }
 
-    private static func firstMatch(_ pattern: String, in text: String) -> [String]? {
+    static func firstMatch(_ pattern: String, in text: String) -> [String]? {
         guard let regex = try? NSRegularExpression(pattern: pattern),
               let m = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text))
         else { return nil }

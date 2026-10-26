@@ -40,11 +40,55 @@ extension EditorController {
                 pdfView?.beginContentEditing(block, on: page)
             case "replace":
                 replaceContentText(block, on: page, with: "편집된 문단입니다. PDF Yaho rewrote this paragraph with PDFium, keeping its font size and width.")
+            case "click":
+                clickQA(block, on: page)
             default:
                 selectedContent = block
             }
         }
     }
 }
-#endif
 
+extension EditorController {
+    /// Clicks a paragraph, types and clicks away using in-process events (no system input), logging each step.
+    func clickQA(_ block: ContentBlock, on page: PDFPage) {
+        guard let view = pdfView else { return }
+        let log = { (line: String) in
+            let url = URL(fileURLWithPath: "/tmp/pdfyaho-qa.log")
+            let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+            try? (text + line + "\n").write(to: url, atomically: true, encoding: .utf8)
+        }
+        func event(_ type: NSEvent.EventType, at viewPoint: CGPoint) -> NSEvent {
+            NSEvent.mouseEvent(with: type, location: view.convert(viewPoint, to: nil), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                               windowNumber: view.window?.windowNumber ?? 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+        }
+        let target = view.convert(CGPoint(x: block.bounds.minX + 20, y: block.bounds.maxY - 6), from: page)
+        log("click at \(target) block \(block.text.prefix(30))")
+        let windowPoint = view.convert(target, to: nil)
+        if let content = view.window?.contentView {
+            let hit = content.hitTest(content.convert(windowPoint, from: nil))
+            log("hitTest → \(hit.map { String(describing: type(of: $0)) } ?? "nil") isPDFView=\(hit === view)")
+        }
+        // Deliver to whatever view is on top, as a real click is (sendEvent would be eaten as an activation click
+        // because the QA app runs in the background).
+        let hit = view.window?.contentView.flatMap { $0.hitTest($0.convert(windowPoint, from: nil)) } ?? view
+        hit.mouseDown(with: event(.leftMouseDown, at: target))
+        hit.mouseUp(with: event(.leftMouseUp, at: target))
+        log("after click: inline=\(view.isEditingInline) responder=\(String(describing: view.window?.firstResponder))")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+            log("after 1s: inline=\(view.isEditingInline) responder=\(String(describing: view.window?.firstResponder))")
+            (view.window?.firstResponder as? NSTextView)?.insertText("수정됨 ", replacementRange: NSRange(location: 0, length: 0))
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                let away = CGPoint(x: view.bounds.midX, y: 30)
+                let awayHit = view.window?.contentView.flatMap { $0.hitTest($0.convert(view.convert(away, to: nil), from: nil)) } ?? view
+                awayHit.mouseDown(with: event(.leftMouseDown, at: away))
+                awayHit.mouseUp(with: event(.leftMouseUp, at: away))
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                    let text = self.document.page(at: self.document.index(for: page) == NSNotFound ? 0 : 0)?.string ?? ""
+                    log("result contains 수정됨: \(text.contains("수정됨"))")
+                }
+            }
+        }
+    }
+}
+#endif

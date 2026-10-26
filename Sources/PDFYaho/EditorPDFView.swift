@@ -513,6 +513,12 @@ final class EditorPDFView: PDFView {
             }
             guard let block = editor.contentBlock(at: point, on: page) else {
                 editor.selectedContent = nil
+                // Say why nothing happened when the click was on visible text.
+                let probe = CGRect(x: point.x - 2, y: point.y - 2, width: 4, height: 4)
+                if !(page.selection(for: probe)?.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    editor.showToast(ContentEditor.isAvailable ? "This text isn't editable — it may be drawn as an image or outlines"
+                                                               : "Editing page text needs PDFium in this build", kind: .info)
+                }
                 return
             }
             editor.selectedContent = block
@@ -566,7 +572,7 @@ final class EditorPDFView: PDFView {
         editor.contentTextStyle = block.style
         startInline(kind: .content, page: page, anchor: CGPoint(x: block.bounds.minX, y: block.bounds.maxY), text: block.text,
                     fontSize: block.style.fontSize, color: block.style.color, style: block.style,
-                    wrapWidth: block.bounds.width + 2) { [weak self] text in
+                    wrapWidth: ContentEditor.wrapWidth(of: block)) { [weak self] text in
             guard let self, let editor = self.editor else { return }
             editor.editingContent = nil
             editor.replaceContentText(block, on: page, with: text)
@@ -658,6 +664,8 @@ final class EditorPDFView: PDFView {
         inline = editorView
         window?.makeFirstResponder(editorView)
     }
+
+    var isEditingInline: Bool { inline != nil }
 
     func commitInline() {
         inline?.finish(cancelled: false)
