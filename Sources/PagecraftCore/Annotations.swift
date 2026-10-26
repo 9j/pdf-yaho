@@ -106,10 +106,13 @@ public enum Annotations {
 
     public static func displayName(_ a: PDFAnnotation) -> String {
         if isRedaction(a) { return "Redaction" }
+        if a is CalloutAnnotation { return "Callout" }
+        if a is CloudAnnotation { return "Cloud" }
         switch a.type ?? "" {
         case "Highlight": return "Highlight"
         case "Underline": return "Underline"
         case "StrikeOut": return "Strikeout"
+        case "Squiggly": return "Squiggly"
         case "Ink": return "Drawing"
         case "FreeText": return "Text"
         case "Text": return "Note"
@@ -123,19 +126,19 @@ public enum Annotations {
     }
 
     public static func markedText(_ a: PDFAnnotation, on page: PDFPage) -> String? {
-        guard ["Highlight", "Underline", "StrikeOut"].contains(a.type ?? "") else { return nil }
+        guard ["Highlight", "Underline", "StrikeOut", "Squiggly"].contains(a.type ?? "") else { return nil }
         return page.selection(for: a.bounds)?.string?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "\n", with: " ")
     }
 
     public static func isMarkup(_ a: PDFAnnotation) -> Bool {
-        ["Highlight", "Underline", "StrikeOut"].contains(a.type ?? "")
+        ["Highlight", "Underline", "StrikeOut", "Squiggly"].contains(a.type ?? "")
     }
 
     /// Annotations whose box can be resized by dragging a corner.
     public static func isResizable(_ a: PDFAnnotation) -> Bool {
-        ["FreeText", "Square", "Circle", "Ink", "Line"].contains(a.type ?? "")
+        a is CalloutAnnotation || a is CloudAnnotation || ["FreeText", "Square", "Circle", "Ink", "Line"].contains(a.type ?? "")
     }
 
     /// The colour the user perceives: text colour for text boxes, stroke colour otherwise.
@@ -155,6 +158,8 @@ public enum Annotations {
 
     /// Moves and scales an annotation into `newBounds`, scaling ink paths and line endpoints with it.
     public static func resize(_ a: PDFAnnotation, to newBounds: CGRect) {
+        if let callout = a as? CalloutAnnotation { callout.resize(to: newBounds); return }
+        if let cloud = a as? CloudAnnotation { cloud.resize(to: newBounds); return }
         let old = a.bounds
         guard old.width > 0, old.height > 0, newBounds.width > 0, newBounds.height > 0 else { a.bounds = newBounds; return }
         let sx = newBounds.width / old.width, sy = newBounds.height / old.height

@@ -139,23 +139,78 @@ extension Annotations {
 
     public enum LineStyle: String, CaseIterable, Identifiable, Sendable {
         case solid = "Solid", dashed = "Dashed", dotted = "Dotted"
+        case shortDashed = "Short Dashed", mediumDashed = "Medium Dashed", dashDotted = "Dash-Dotted"
         public var id: String { rawValue }
+
+        /// The PDF dash array (user-space units) for this style; empty for solid.
+        public var dashPattern: [CGFloat] {
+            switch self {
+            case .solid: []
+            case .dotted: [1.5, 3]
+            case .shortDashed: [3, 3]
+            case .dashed: [6, 4]
+            case .mediumDashed: [10, 5]
+            case .dashDotted: [8, 3, 1.5, 3]
+            }
+        }
     }
 
     public static func lineStyle(of a: PDFAnnotation) -> LineStyle {
         guard a.border?.style == .dashed, let pattern = a.border?.dashPattern as? [NSNumber], let first = pattern.first else { return .solid }
-        return first.doubleValue <= 2 ? .dotted : .dashed
+        if pattern.count >= 4 { return .dashDotted }
+        switch first.doubleValue {
+        case ...2: return .dotted
+        case ...4.5: return .shortDashed
+        case ...7: return .dashed
+        default: return .mediumDashed
+        }
     }
 
     public static func setLineStyle(_ style: LineStyle, of a: PDFAnnotation) {
         let border = PDFBorder()
         border.lineWidth = a.border?.lineWidth ?? 1
-        switch style {
-        case .solid: border.style = .solid
-        case .dashed: border.style = .dashed; border.dashPattern = [6, 4]
-        case .dotted: border.style = .dashed; border.dashPattern = [1.5, 3]
+        if style == .solid {
+            border.style = .solid
+        } else {
+            border.style = .dashed
+            border.dashPattern = style.dashPattern.map { NSNumber(value: Double($0)) }
         }
         a.border = border
+    }
+
+    // MARK: Line endings
+
+    /// A line ending the user can choose, with the label and SF Symbol for a picker.
+    public struct LineEnding: Identifiable, Hashable, Sendable {
+        public let style: PDFLineStyle
+        public let displayName: String
+        public let symbolName: String
+        public var id: Int { style.rawValue }
+
+        public static let all: [LineEnding] = [
+            LineEnding(style: .none, displayName: "None", symbolName: "minus"),
+            LineEnding(style: .openArrow, displayName: "Open Arrow", symbolName: "arrow.right"),
+            LineEnding(style: .closedArrow, displayName: "Closed Arrow", symbolName: "arrowtriangle.right.fill"),
+            LineEnding(style: .circle, displayName: "Circle", symbolName: "circle.fill"),
+            LineEnding(style: .square, displayName: "Square", symbolName: "square.fill"),
+            LineEnding(style: .diamond, displayName: "Diamond", symbolName: "diamond.fill"),
+        ]
+
+        public static func of(_ style: PDFLineStyle) -> LineEnding { all.first { $0.style == style } ?? all[0] }
+    }
+
+    /// The endings offered by pickers, in display order.
+    public static let supportedLineEndings: [LineEnding] = LineEnding.all
+
+    /// Sets the start and end decoration of a line annotation; other annotation types are left alone.
+    public static func setLineEndings(start: PDFLineStyle, end: PDFLineStyle, of a: PDFAnnotation) {
+        guard a.type == "Line" else { return }
+        a.startLineStyle = start
+        a.endLineStyle = end
+    }
+
+    public static func lineEndings(of a: PDFAnnotation) -> (start: PDFLineStyle, end: PDFLineStyle) {
+        (a.startLineStyle, a.endLineStyle)
     }
 
     /// Fill colour for rectangles and ovals; nil removes the fill.
