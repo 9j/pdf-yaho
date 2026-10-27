@@ -221,29 +221,47 @@ struct TextSelectionMenu: View {
         HStack(spacing: 2) {
             ForEach([Tool.highlight, .underline, .strikeout]) { tool in
                 Button { editor.markSelection(with: tool) } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: tool.symbol)
-                        Text(tool.label)
-                    }
-                    .font(.callout)
-                    .padding(.horizontal, 9)
-                    .frame(height: 28)
-                    .background(alignment: .bottom) {
-                        Capsule().fill(Color(nsColor: editor.style(for: tool).color)).frame(height: 3).padding(.horizontal, 10)
-                    }
-                    .contentShape(Rectangle())
+                    Image(systemName: tool.symbol)
+                        .font(.system(size: 14, weight: .medium))
+                        .frame(width: 34, height: 28)
+                        .background(alignment: .bottom) {
+                            Capsule().fill(Color(nsColor: editor.style(for: tool).color)).frame(width: 14, height: 3).offset(y: -2)
+                        }
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(HoverButtonStyle())
+                .buttonStyle(PopButtonStyle(tint: Color(nsColor: editor.style(for: tool).color)))
+                .help(tool.label)
+                .accessibilityLabel(tool.label)
             }
             Divider().frame(height: 18).padding(.horizontal, 2)
             Button { editor.copySelection() } label: {
-                Label("Copy", systemImage: "doc.on.doc").font(.callout).padding(.horizontal, 9).frame(height: 28)
+                Image(systemName: "doc.on.doc")
+                    .font(.system(size: 14, weight: .medium))
+                    .frame(width: 34, height: 28)
+                    .contentShape(Rectangle())
             }
-            .buttonStyle(HoverButtonStyle())
+            .buttonStyle(PopButtonStyle(tint: .accentColor))
+            .help("Copy")
+            .accessibilityLabel("Copy")
         }
         .padding(.horizontal, 4)
         .frame(height: 36)
         .floatingChrome(Capsule())
+    }
+}
+
+/// Icon button that fills with its tint on hover and pops when pressed.
+struct PopButtonStyle: ButtonStyle {
+    let tint: Color
+    @State private var hovering = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.86 : hovering ? 1.1 : 1)
+            .background(Capsule().fill(tint.opacity(configuration.isPressed ? 0.35 : hovering ? 0.2 : 0)))
+            .animation(.spring(response: 0.22, dampingFraction: 0.55), value: configuration.isPressed)
+            .animation(.snappy(duration: 0.14), value: hovering)
+            .onHover { hovering = $0 }
     }
 }
 
