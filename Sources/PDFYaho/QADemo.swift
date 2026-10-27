@@ -359,4 +359,95 @@ enum WindowQA {
         }
     }
 }
+
+/// PDFYAHO_QA_SCROLL=<seconds>: scrolls the document at a steady speed on the display's clock
+/// and logs frame pacing, so scrolling smoothness can be measured without input events.
+final class ScrollProbe: NSObject {
+    private weak var editor: EditorController?
+    private var link: CADisplayLink?
+    private var last: CFTimeInterval = 0
+    private var start: CFTimeInterval = 0
+    private var intervals: [Double] = []
+    private var duration: Double = 0
+    private var expected: Double = 1.0 / 60
+    private var direction: CGFloat = 1
+    private static var current: ScrollProbe?
+
+    @MainActor static func run(_ editor: EditorController, seconds: Double) {
+        guard current == nil, editor.fileURL != nil, let view = editor.pdfView else { return }
+        // Occluded windows get no display-link callbacks; show it without taking key focus.
+        view.window?.orderFrontRegardless()
+        let probe = ScrollProbe()
+        probe.editor = editor
+        probe.duration = seconds
+        probe.link = view.displayLink(target: probe, selector: #selector(tick(_:)))
+        probe.link?.add(to: .main, forMode: .common)
+        current = probe
+    }
+
+    func note(_ line: String) {
+        let url = URL(fileURLWithPath: "/tmp/pdfyaho-qa.log")
+        let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        try? (text + line + "\n").write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    @MainActor @objc private func tick(_ link: CADisplayLink) {
+        let now = link.timestamp
+        expected = max(1.0 / 240, link.targetTimestamp - link.timestamp)
+        if last == 0 { start = now } else { intervals.append(now - last) }
+        last = now
+        if now - start >= duration { finish(); return }
+        guard let clip = editor?.pdfView?.scrollView?.contentView, let docView = clip.documentView else { return }
+        // About two screens per second, bouncing at either end.
+        var origin = clip.bounds.origin
+        let step = 1800 * expected * direction
+        origin.y += clip.isFlipped ? step : -step
+        let maxY = docView.frame.height - clip.bounds.height
+        if origin.y < 0 || origin.y > maxY { direction *= -1; origin.y = min(max(0, origin.y), maxY) }
+        clip.scroll(to: origin)
+        clip.superview.flatMap { $0 as? NSScrollView }?.reflectScrolledClipView(clip)
+    }
+
+    @MainActor private func finish() {
+        link?.invalidate()
+        let sorted = intervals.sorted()
+        let budget = expected * 1.5
+        let dropped = intervals.filter { $0 > budget }.count
+        let missed = intervals.reduce(0) { $0 + max(0, Int(($1 / expected).rounded()) - 1) }
+        let p = { (q: Double) in sorted.isEmpty ? 0 : sorted[min(sorted.count - 1, Int(Double(sorted.count) * q))] * 1000 }
+        let line = String(format: "scroll: frames=%d slow=%d missed=%d target=%.1fms p50=%.1f p95=%.1f p99=%.1f max=%.1f",
+                          intervals.count, dropped, missed, expected * 1000, p(0.5), p(0.95), p(0.99), (sorted.last ?? 0) * 1000)
+        var elapsed = 0.0
+        let slow = intervals.compactMap { i -> String? in
+            elapsed += i
+            return i > budget ? String(format: "%.2fs:%.0fms", elapsed, i * 1000) : nil
+        }
+        note(line)
+        note("slow frames: " + slow.joined(separator: " "))
+        ScrollProbe.current = nil
+    }
+}
+
+extension EditorController {
+    /// PDFYAHO_QA_SEARCH=<query>: searches 2.5 s after opening and logs when results arrive.
+    func runSearchQA(_ query: String) {
+        guard fileURL != nil else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [self] in
+            let start = Date()
+            var firstAt: Double?
+            searchText = query
+            search(remember: false)
+            @MainActor func poll() {
+                if firstAt == nil, !searchResults.isEmpty { firstAt = Date().timeIntervalSince(start) }
+                if searching { DispatchQueue.main.asyncAfter(deadline: .now() + 0.01, execute: poll); return }
+                let line = String(format: "search %@: %d results, first after %.2fs, done after %.2fs",
+                                  query, searchResults.count, firstAt ?? -1, Date().timeIntervalSince(start))
+                let url = URL(fileURLWithPath: "/tmp/pdfyaho-qa.log")
+                let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+                try? (text + line + "\n").write(to: url, atomically: true, encoding: .utf8)
+            }
+            poll()
+        }
+    }
+}
 #endif
