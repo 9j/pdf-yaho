@@ -393,14 +393,16 @@ enum SidebarTab: String, CaseIterable, Identifiable {
 /// Per-window editing state and every mutation of the document. Mutations register undo
 /// actions, which is also how SwiftUI learns that the document has unsaved changes.
 @MainActor
+@Observable
 final class EditorController: ObservableObject {
-    let file: PDFFile
-    var document: PDFDocument { file.pdf }
-    weak var pdfView: EditorPDFView?
-    weak var undoManager: UndoManager? { didSet { observeUndo() } }
-    @Published private(set) var canUndo = false
-    @Published private(set) var canRedo = false
-    private var undoObservers: [NSObjectProtocol] = []
+    @ObservationIgnored let file: PDFFile
+    /// Views that read the document refresh when `revision` changes, i.e. after every edit.
+    var document: PDFDocument { _ = revision; return file.pdf }
+    @ObservationIgnored weak var pdfView: EditorPDFView?
+    @ObservationIgnored weak var undoManager: UndoManager? { didSet { observeUndo() } }
+    private(set) var canUndo = false
+    private(set) var canRedo = false
+    @ObservationIgnored private var undoObservers: [NSObjectProtocol] = []
 
     private func observeUndo() {
         let center = NotificationCenter.default
@@ -420,9 +422,9 @@ final class EditorController: ObservableObject {
         }
     }
 
-    @Published var mode: EditorMode = .read { didSet { modeChanged(from: oldValue) } }
-    @Published var tool: Tool = .select { didSet { toolChanged() } }
-    @Published var styles: [Tool: ToolStyle] = {
+    var mode: EditorMode = .read { didSet { modeChanged(from: oldValue) } }
+    var tool: Tool = .select { didSet { toolChanged() } }
+    var styles: [Tool: ToolStyle] = {
         var styles: [Tool: ToolStyle] = [
             .highlight: ToolStyle(color: Palette.swatches[4], width: 0),
             .underline: ToolStyle(color: Palette.swatches[7], width: 0),
@@ -441,86 +443,86 @@ final class EditorController: ObservableObject {
         for measure in Tool.measures { styles[measure] = ToolStyle(color: Palette.swatches[7], width: 1.5) }
         return styles
     }()
-    @Published var stampChoice: StampChoice = .preset(StampPreset.all[0])
-    @Published var activeSignatureID: UUID?
-    @Published var signatureLibrary: [SavedSignature] = SignatureLibrary.load()
-    @Published var pendingLink: (page: PDFPage, rect: CGRect)?
-    @Published var showLinkSheet = false
-    @Published var showFindRedact = false
-    @Published var signaturePadInitials = false
+    var stampChoice: StampChoice = .preset(StampPreset.all[0])
+    var activeSignatureID: UUID?
+    var signatureLibrary: [SavedSignature] = SignatureLibrary.load()
+    var pendingLink: (page: PDFPage, rect: CGRect)?
+    var showLinkSheet = false
+    var showFindRedact = false
+    var signaturePadInitials = false
     /// Annotation copied with ⌘C, pasted with ⌘V.
-    var annotationClipboard: PDFAnnotation?
-    @Published private(set) var lastMarkupTool: Tool = .highlight
-    @Published private(set) var lastShape: Tool = .rectangle
-    @Published private(set) var lastPen: Tool = .pen
-    @Published private(set) var lastFillAndSign: Tool = .signature
-    @Published private(set) var lastMeasure: Tool = .measureDistance
-    @Published var measureScale = Measure.Scale()
-    @Published var showMeasureScale = false
-    @Published var selected: SelectedAnnotation? { didSet { overlayTick += 1 } }
-    @Published var textSelectionActive = false
+    @ObservationIgnored var annotationClipboard: PDFAnnotation?
+    private(set) var lastMarkupTool: Tool = .highlight
+    private(set) var lastShape: Tool = .rectangle
+    private(set) var lastPen: Tool = .pen
+    private(set) var lastFillAndSign: Tool = .signature
+    private(set) var lastMeasure: Tool = .measureDistance
+    var measureScale = Measure.Scale()
+    var showMeasureScale = false
+    var selected: SelectedAnnotation? { didSet { overlayTick += 1 } }
+    var textSelectionActive = false
     /// Bumped whenever on-screen geometry changes so overlays re-measure.
-    @Published private(set) var overlayTick = 0
+    private(set) var overlayTick = 0
 
-    @Published var layout: PageLayout = Preferences.defaultLayout { didSet { applyLayout() } }
-    @Published var theme: ReadingTheme = Preferences.defaultTheme { didSet { applyTheme() } }
+    var layout: PageLayout = Preferences.defaultLayout { didSet { applyLayout() } }
+    var theme: ReadingTheme = Preferences.defaultTheme { didSet { applyTheme() } }
     /// Second document shown beside this one.
-    @Published var split: SplitState? { didSet { splitChanged(from: oldValue) } }
+    var split: SplitState? { didSet { splitChanged(from: oldValue) } }
     /// Page to return to after a jump through a link, the outline or search.
-    @Published var backTarget: Int?
-    @Published private var hudAwake = true
-    @Published var hudHovered = false
+    var backTarget: Int?
+    private var hudAwake = true
+    var hudHovered = false
     /// Page under the pointer, for the bookmark ribbon.
-    @Published var hoverPage: PDFPage?
-    @Published var searchHistory: [String] = UserDefaults.standard.stringArray(forKey: "searchHistory") ?? []
+    var hoverPage: PDFPage?
+    var searchHistory: [String] = UserDefaults.standard.stringArray(forKey: "searchHistory") ?? []
     /// Personal bookmarks (page indices), kept per file outside the PDF.
-    @Published private(set) var bookmarks: [Int] = []
+    private(set) var bookmarks: [Int] = []
     /// Where to put a freshly created PDF view (for example after split view toggles).
-    var pendingDestination: PDFDestination?
-    private var hudTimer: DispatchWorkItem?
-    private var backTimer: DispatchWorkItem?
-    private var splitSync: ScrollSync?
-    @Published var sidebarTab: SidebarTab = .thumbnails
-    @Published var selectedPages: Set<Int> = []
-    @Published private(set) var currentPageIndex = 0
-    @Published private(set) var revision = 0
-    @Published private(set) var scale: CGFloat = 1
-    @Published var searchText = ""
-    @Published private(set) var searchResults: [PDFSelection] = []
-    @Published var searchIndex = 0
-    @Published var searchMatchCase = false { didSet { if !searchResults.isEmpty { search() } } }
-    @Published var searchWholeWords = false { didSet { if !searchResults.isEmpty { search() } } }
-    @Published var showSignaturePad = false
-    @Published var showProperties = false
-    @Published var showPasswordSheet = false
-    @Published var showReduceSize = false
-    @Published var showExportImages = false
-    @Published var showPageSize = false
-    @Published var showSplit = false
-    @Published var showPageLabels = false
+    @ObservationIgnored var pendingDestination: PDFDestination?
+    @ObservationIgnored private var hudTimer: DispatchWorkItem?
+    @ObservationIgnored private var backTimer: DispatchWorkItem?
+    @ObservationIgnored private var splitSync: ScrollSync?
+    var sidebarTab: SidebarTab = .thumbnails
+    var selectedPages: Set<Int> = []
+    private(set) var currentPageIndex = 0
+    private(set) var revision = 0
+    private(set) var scale: CGFloat = 1
+    var searchText = ""
+    private(set) var searchResults: [PDFSelection] = []
+    var searchIndex = 0
+    var searchMatchCase = false { didSet { if !searchResults.isEmpty { search() } } }
+    var searchWholeWords = false { didSet { if !searchResults.isEmpty { search() } } }
+    var showSignaturePad = false
+    var showProperties = false
+    var showPasswordSheet = false
+    var showReduceSize = false
+    var showExportImages = false
+    var showPageSize = false
+    var showSplit = false
+    var showPageLabels = false
 
     // Edit mode: the page's own text and images, read with PDFium for one page at a time.
-    @Published var contentBlocks: [ContentBlock] = []
-    @Published var selectedContent: ContentBlock?
-    @Published var hoveredContent: ContentBlock?
+    var contentBlocks: [ContentBlock] = []
+    var selectedContent: ContentBlock?
+    var hoveredContent: ContentBlock?
     /// Where a block being dragged would land (page space).
-    @Published var contentDragFrame: CGRect?
+    var contentDragFrame: CGRect?
     /// The block whose text is open in the inline editor; its outline is hidden meanwhile.
-    @Published var editingContent: ContentBlock?
+    var editingContent: ContentBlock?
     /// Style for text added in Edit mode.
-    @Published var contentTextStyle = TextStyle(fontName: "Helvetica", fontSize: 12)
-    var contentPage: PDFPage?
-    @Published var headerFooterPreset: HeaderFooterPreset?
+    var contentTextStyle = TextStyle(fontName: "Helvetica", fontSize: 12)
+    @ObservationIgnored var contentPage: PDFPage?
+    var headerFooterPreset: HeaderFooterPreset?
     /// Rectangle being drawn with the Crop tool, in page space.
-    @Published var cropDraft: (page: PDFPage, rect: CGRect)? { didSet { overlayTick += 1 } }
+    var cropDraft: (page: PDFPage, rect: CGRect)? { didSet { overlayTick += 1 } }
     /// Message for a blocking progress overlay, while a long operation runs.
-    @Published var busy: String?
-    @Published var needsPassword: Bool
-    @Published var toast: Toast?
-    @Published var focusPageField = false
+    var busy: String?
+    var needsPassword: Bool
+    var toast: Toast?
+    var focusPageField = false
 
-    private var thumbnailCache: [ObjectIdentifier: [String: NSImage]] = [:]
-    private var observers: [NSObjectProtocol] = []
+    @ObservationIgnored private let thumbnails = ThumbnailCache()
+    @ObservationIgnored private var observers: [NSObjectProtocol] = []
 
     init(file: PDFFile) {
         self.file = file
@@ -549,7 +551,7 @@ final class EditorController: ObservableObject {
         fileURL.flatMap { try? $0.resourceValues(forKeys: [.fileSizeKey]).fileSize } ?? document.dataRepresentation()?.count
     }
 
-    var isPasswordProtected: Bool { file.userPassword != nil }
+    var isPasswordProtected: Bool { _ = revision; return file.userPassword != nil }
 
     // MARK: View wiring
 
@@ -597,7 +599,7 @@ final class EditorController: ObservableObject {
         }
     }
 
-    private var viewSyncPending = false
+    @ObservationIgnored private var viewSyncPending = false
 
     // MARK: Page indicator, history and bookmarks
 
@@ -616,13 +618,12 @@ final class EditorController: ObservableObject {
         let work = DispatchWorkItem { [weak self] in self?.hudAwake = false }
         hudTimer = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.5, execute: work)
-        objectWillChange.send()
     }
 
-    private var historyFrom: Int?
+    @ObservationIgnored private var historyFrom: Int?
 
     /// History changes while the view first positions itself are not user jumps.
-    private var historyArmed = false
+    @ObservationIgnored private var historyArmed = false
 
     private func historyChanged() {
         guard historyArmed else { return }
@@ -727,7 +728,9 @@ final class EditorController: ObservableObject {
             if abs(view.scaleFactor - self.scale) > 0.001 { self.scale = view.scaleFactor }
             self.pokeHUD()
             if self.textSelectionActive, (view.currentSelection?.string ?? "").isEmpty { self.textSelectionActive = false }
-            if self.selected != nil || self.textSelectionActive || self.cropDraft != nil || self.hoverPage != nil { self.overlayTick += 1 }
+            // Overlays are positioned in view coordinates, so they follow scrolling; skip the update when none is shown.
+            if self.selected != nil || self.textSelectionActive || self.cropDraft != nil || self.hoverPage != nil
+                || (self.mode == .edit && !self.contentBlocks.isEmpty) { self.overlayTick += 1 }
         }
     }
 
@@ -741,11 +744,14 @@ final class EditorController: ObservableObject {
         NSDocumentController.shared.document(for: window)?.updateChangeCount(.changeDone)
     }
 
+    /// Redraws the selection and other overlays after an annotation moved or resized in place.
+    func refreshOverlays() { overlayTick += 1 }
+
     func changed(_ pages: [PDFPage] = []) {
         if pages.isEmpty {
-            thumbnailCache.removeAll()
+            thumbnails.removeAll()
         } else {
-            for page in pages { thumbnailCache[ObjectIdentifier(page)] = nil }
+            for page in pages { thumbnails.invalidate(page) }
         }
         for page in pages { pdfView?.annotationsChanged(on: page) }
         revision += 1
@@ -766,14 +772,28 @@ final class EditorController: ObservableObject {
         }
     }
 
+    /// A page thumbnail, rendered here on the main thread if it is not cached. Lists use `PageThumbnail`, which renders in the background.
     func thumbnail(for index: Int, side: CGFloat = 240) -> NSImage? {
         guard let page = document.page(at: index) else { return nil }
-        let bucket = side <= 240 ? 240 : side <= 480 ? 480 : 720
-        let key = "\(page.rotation)-\(bucket)"
-        if let cached = thumbnailCache[ObjectIdentifier(page)]?[key] { return cached }
-        let image = page.thumbnail(of: CGSize(width: bucket, height: bucket), for: .cropBox)
-        thumbnailCache[ObjectIdentifier(page), default: [:]][key] = image
-        return image
+        return thumbnails.image(for: page, side: side) ?? thumbnails.render(page, side: side)
+    }
+
+    func cachedThumbnail(for index: Int, side: CGFloat) -> NSImage? {
+        document.page(at: index).flatMap { thumbnails.image(for: $0, side: side) }
+    }
+
+    func loadThumbnail(for index: Int, side: CGFloat) async -> NSImage? {
+        guard let page = document.page(at: index) else { return nil }
+        if let image = thumbnails.image(for: page, side: side) { return image }
+        return await thumbnails.renderInBackground(page, side: side)
+    }
+
+    /// Width over height of a page as displayed, for placeholders while its thumbnail renders.
+    func pageAspect(_ index: Int) -> CGFloat {
+        guard let page = document.page(at: index) else { return 0.75 }
+        let box = page.bounds(for: .cropBox).size
+        let size = page.rotation % 180 == 0 ? box : CGSize(width: box.height, height: box.width)
+        return size.height > 0 ? size.width / size.height : 0.75
     }
 
     func showToast(_ message: String, url: URL? = nil, kind: Toast.Kind? = nil) {
@@ -820,7 +840,7 @@ final class EditorController: ObservableObject {
 
     // MARK: Modes and tools
 
-    private var lastTool: [EditorMode: Tool] = [:]
+    @ObservationIgnored private var lastTool: [EditorMode: Tool] = [:]
 
     private func modeChanged(from old: EditorMode) {
         guard mode != old else { return }
@@ -1038,7 +1058,8 @@ final class EditorController: ObservableObject {
         let after = StyleSnapshot(target.annotation)
         registerStyleUndo(target, name: name, undo: before, redo: after)
         changed([target.page])
-        objectWillChange.send()
+        // The palette reads the selected annotation's style; re-announce the selection so it refreshes.
+        selected = selected
     }
 
     private func registerStyleUndo(_ target: SelectedAnnotation, name: String, undo: StyleSnapshot, redo: StyleSnapshot) {
@@ -1085,7 +1106,7 @@ final class EditorController: ObservableObject {
     }
 
     /// The markup just created, so the text-selection menu can offer "Add Comment".
-    var lastMarkup: SelectedAnnotation?
+    @ObservationIgnored var lastMarkup: SelectedAnnotation?
 
     /// A comment (the annotation's contents) on any annotation: highlights, shapes, stamps…
     func setComment(_ text: String, of annotation: PDFAnnotation, on page: PDFPage) {
@@ -1094,7 +1115,6 @@ final class EditorController: ObservableObject {
         annotation.contents = text
         registerUndo(text.isEmpty ? "Remove Comment" : "Edit Comment") { $0.setComment(previous, of: annotation, on: page) }
         changed([page])
-        objectWillChange.send()
     }
 
     /// Markup from the floating text-selection menu.
@@ -1425,7 +1445,7 @@ final class EditorController: ObservableObject {
     }
 
     /// Columns in the Pages grid, reported by the grid so arrow keys move by rows.
-    var pagesPerRow = 4
+    @ObservationIgnored var pagesPerRow = 4
 
     func copyPages() {
         let pages = targetPageIndices.compactMap { document.page(at: $0) }
@@ -1505,7 +1525,7 @@ final class EditorController: ObservableObject {
         undoManager?.setActionName("Remove All Annotations")
     }
 
-    @Published var redactionStyle: Annotations.RedactionStyle = .blackout
+    var redactionStyle: Annotations.RedactionStyle = .blackout
 
     func markForRedaction(_ queries: [String], matchCase: Bool, wholeWords: Bool, style: Annotations.RedactionStyle) {
         let results = queries.flatMap { Search.find($0, in: document, matchCase: matchCase, wholeWords: wholeWords) }
@@ -1877,7 +1897,7 @@ final class EditorController: ObservableObject {
     // MARK: Search
 
     /// Asks the window to show the sidebar (used when search results arrive).
-    @Published var revealSidebar = false
+    var revealSidebar = false
 
     /// - Parameter remember: adds the query to search history (on Return, not while typing).
     func search(remember: Bool = true) {
@@ -1920,8 +1940,8 @@ final class EditorController: ObservableObject {
 
     // MARK: Page labels
 
-    var pageLabels: [PageLabelRange] { file.pageLabels }
-    var hasPageLabels: Bool { !file.pageLabels.isEmpty }
+    var pageLabels: [PageLabelRange] { _ = revision; return file.pageLabels }
+    var hasPageLabels: Bool { _ = revision; return !file.pageLabels.isEmpty }
 
     /// The label printed for a page ("iii", "A-5"), or its number when the document has no labels.
     func pageLabel(_ index: Int) -> String {
@@ -1942,7 +1962,7 @@ final class EditorController: ObservableObject {
         guard ranges != previous else { return }
         file.pageLabels = ranges.sorted { $0.startPage < $1.startPage }
         registerUndo(ranges.isEmpty ? "Remove Page Labels" : "Page Labels") { $0.setPageLabels(previous) }
-        objectWillChange.send()
+        revision += 1
         showToast(ranges.isEmpty ? "Page labels removed" : "Page labels updated")
     }
 
@@ -1954,7 +1974,7 @@ final class EditorController: ObservableObject {
         file.userPassword = password
         file.ownerPassword = nil
         registerUndo(password == nil ? "Remove Password" : "Set Password") { $0.setPassword(previous) }
-        objectWillChange.send()
+        revision += 1
         showToast(password == nil ? "Password removed — save to apply" : "Password set — save to apply")
     }
 

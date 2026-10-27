@@ -226,7 +226,7 @@ final class EditorPDFView: PDFView {
             NSCursor.closedHand.set()
             selected.annotation.bounds.origin = original.origin + (point - start)
             annotationsChanged(on: selected.page)
-            editor.objectWillChange.send()
+            editor.refreshOverlays()
         case let .resize(selected, anchor, _):
             guard let (_, point, _) = pagePoint(event, page: selected.page) else { return }
             var rect = CGRect(x: min(anchor.x, point.x), y: min(anchor.y, point.y),
@@ -235,7 +235,7 @@ final class EditorPDFView: PDFView {
             rect.size.height = max(rect.height, 8)
             Annotations.resize(selected.annotation, to: rect)
             annotationsChanged(on: selected.page)
-            editor.objectWillChange.send()
+            editor.refreshOverlays()
         case let .content(block, page, start, moved):
             guard let (_, point, _) = pagePoint(event, page: page) else { return }
             let delta = point - start

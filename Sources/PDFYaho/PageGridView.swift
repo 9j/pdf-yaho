@@ -105,21 +105,17 @@ private struct PageCell: View {
     var body: some View {
         VStack(spacing: 10) {
             ZStack(alignment: .topTrailing) {
-                if let image = editor.thumbnail(for: index, side: size * 2) {
-                    Image(nsImage: image)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(maxWidth: size, maxHeight: size * 1.35)
-                        .background(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 3))
-                        .shadow(color: .black.opacity(hovering ? 0.28 : 0.16), radius: hovering ? 8 : 4, y: 2)
-                        .padding(5)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .strokeBorder(selected ? Color.accentColor : dropTarget ? Color.accentColor.opacity(0.6) : .clear,
-                                              style: StrokeStyle(lineWidth: 3, dash: dropTarget && !selected ? [6, 4] : []))
-                        )
-                }
+                PageThumbnail(editor: editor, index: index, side: size * 2)
+                    .frame(maxWidth: size, maxHeight: size * 1.35)
+                    .background(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                    .shadow(color: .black.opacity(hovering ? 0.28 : 0.16), radius: hovering ? 8 : 4, y: 2)
+                    .padding(5)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(selected ? Color.accentColor : dropTarget ? Color.accentColor.opacity(0.6) : .clear,
+                                          style: StrokeStyle(lineWidth: 3, dash: dropTarget && !selected ? [6, 4] : []))
+                    )
                 if editor.isBookmarked(index) {
                     Image(systemName: "bookmark.fill").font(.system(size: 16)).foregroundStyle(.red)
                         .padding(.trailing, 14)

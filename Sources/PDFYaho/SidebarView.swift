@@ -42,52 +42,70 @@ struct SidebarView: View {
 struct ThumbnailList: View {
     @ObservedObject var editor: EditorController
 
+    // The body reads only the page count and revision. The current page is read by each visible row,
+    // so turning a page doesn't rebuild a list of thousands of rows.
     var body: some View {
         ScrollViewReader { proxy in
             List {
                 ForEach(0..<editor.pageCount, id: \.self) { index in
-                    let current = index == editor.currentPageIndex
-                    VStack(spacing: 6) {
-                        if let image = editor.thumbnail(for: index) {
-                            Image(nsImage: image)
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(maxHeight: 170)
-                                .background(.white)
-                                .clipShape(RoundedRectangle(cornerRadius: 2))
-                                .shadow(color: .black.opacity(0.18), radius: 2, y: 1)
-                                .padding(4)
-                                .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                    .strokeBorder(current ? Color.accentColor : .clear, lineWidth: 2.5))
-                                .overlay(alignment: .topTrailing) {
-                                    if editor.isBookmarked(index) {
-                                        Image(systemName: "bookmark.fill").font(.system(size: 12)).foregroundStyle(.red).padding(.trailing, 10)
-                                    }
-                                }
-                        }
-                        Text(editor.pageLabel(index))
-                            .font(.caption.weight(current ? .semibold : .regular))
-                            .monospacedDigit()
-                            .foregroundStyle(current ? Color.accentColor : .secondary)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 4)
-                    .contentShape(Rectangle())
-                    .onTapGesture { editor.goToPage(index) }
-                    .id(index)
-                    .contextMenu { PageMenu(editor: editor, index: index) }
-                    .listRowSeparator(.hidden)
+                    ThumbnailRow(editor: editor, index: index)
+                        .contentShape(Rectangle())
+                        .onTapGesture { editor.goToPage(index) }
+                        .id(index)
+                        .contextMenu { PageMenu(editor: editor, index: index) }
+                        .listRowSeparator(.hidden)
                 }
                 .onMove { editor.movePages(from: $0, to: $1) }
             }
             .listStyle(.sidebar)
+            .background { FollowCurrentPage(editor: editor, proxy: proxy) }
+        }
+    }
+}
+
+/// Keeps the current page's thumbnail in view.
+private struct FollowCurrentPage: View {
+    let editor: EditorController
+    let proxy: ScrollViewProxy
+
+    var body: some View {
+        Color.clear
             .onAppear {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { proxy.scrollTo(editor.currentPageIndex, anchor: .top) }
             }
             .onChange(of: editor.currentPageIndex) { _, index in
                 withAnimation { proxy.scrollTo(index) }
             }
+    }
+}
+
+private struct ThumbnailRow: View {
+    let editor: EditorController
+    let index: Int
+
+    var body: some View {
+        let current = index == editor.currentPageIndex
+        VStack(spacing: 6) {
+            PageThumbnail(editor: editor, index: index, side: 240)
+                .frame(maxHeight: 170)
+                .background(.white)
+                .clipShape(RoundedRectangle(cornerRadius: 2))
+                .shadow(color: .black.opacity(0.18), radius: 2, y: 1)
+                .padding(4)
+                .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(current ? Color.accentColor : .clear, lineWidth: 2.5))
+                .overlay(alignment: .topTrailing) {
+                    if editor.isBookmarked(index) {
+                        Image(systemName: "bookmark.fill").font(.system(size: 12)).foregroundStyle(.red).padding(.trailing, 10)
+                    }
+                }
+            Text(editor.pageLabel(index))
+                .font(.caption.weight(current ? .semibold : .regular))
+                .monospacedDigit()
+                .foregroundStyle(current ? Color.accentColor : .secondary)
         }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 4)
     }
 }
 
