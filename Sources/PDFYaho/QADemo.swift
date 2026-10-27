@@ -449,5 +449,16 @@ extension EditorController {
             poll()
         }
     }
+
+    /// PDFYAHO_QA_SELECT=<phrase>: selects the first match 2 s after opening so the text menu shows.
+    func runSelectQA(_ phrase: String) {
+        guard fileURL != nil else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [self] in
+            guard let match = document.findString(phrase, withOptions: []).first else { return }
+            pdfView?.go(to: match)
+            pdfView?.setCurrentSelection(match, animate: false)
+            textSelectionActive = true
+        }
+    }
 }
 #endif
