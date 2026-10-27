@@ -818,10 +818,13 @@ final class EditorController: ObservableObject {
 
     // MARK: Geometry for SwiftUI overlays (top-left origin, PDF view coordinates)
 
+    /// Nil when the rectangle has no finite position, such as an empty selection's `CGRect.null`: SwiftUI hands
+    /// NaN coordinates on to Core Animation, which throws and takes the app down.
     func viewRect(_ rect: CGRect, on page: PDFPage) -> CGRect? {
-        guard let view = pdfView else { return nil }
+        guard let view = pdfView, !rect.isNull, !rect.isInfinite else { return nil }
         let r = view.convert(rect, from: page)
-        return CGRect(x: r.minX, y: view.bounds.height - r.maxY, width: r.width, height: r.height)
+        let frame = CGRect(x: r.minX, y: view.bounds.height - r.maxY, width: r.width, height: r.height)
+        return [frame.minX, frame.minY, frame.width, frame.height].allSatisfy(\.isFinite) ? frame : nil
     }
 
     var selectionFrame: CGRect? {
