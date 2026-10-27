@@ -106,6 +106,7 @@ struct DocumentView: View {
                 if let delay = ProcessInfo.processInfo.environment["PDFYAHO_QA_DEMORUN"].flatMap(Double.init) { editor.runDemoQA(after: delay) }
                 if let query = ProcessInfo.processInfo.environment["PDFYAHO_QA_SEARCH"] { editor.runSearchQA(query) }
                 if let phrase = ProcessInfo.processInfo.environment["PDFYAHO_QA_SELECT"] { editor.runSelectQA(phrase) }
+                if let count = ProcessInfo.processInfo.environment["PDFYAHO_QA_DRAG"].flatMap(Int.init) { editor.runDragQA(count) }
                 if let seconds = ProcessInfo.processInfo.environment["PDFYAHO_QA_SCROLL"].flatMap(Double.init) {
                     let delay = ProcessInfo.processInfo.environment["PDFYAHO_QA_SCROLL_DELAY"].flatMap(Double.init) ?? 2
                     DispatchQueue.main.asyncAfter(deadline: .now() + delay) { ScrollProbe.run(editor, seconds: seconds) }

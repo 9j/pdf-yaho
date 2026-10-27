@@ -450,6 +450,67 @@ extension EditorController {
         }
     }
 
+    /// PDFYAHO_QA_DRAG=<count>: drags across the view in-process (no system input), then random drags, logging the
+    /// document's edited state and the text menu frame after each one.
+    func runDragQA(_ count: Int) {
+        guard fileURL != nil else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [self] in
+            guard let view = pdfView, let window = view.window, let first = document.page(at: 0) else { return }
+            let doc = NSDocumentController.shared.document(for: window)
+            func note(_ line: String) {
+                let url = URL(fileURLWithPath: "/tmp/pdfyaho-qa.log")
+                let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+                try? (text + line + "\n").write(to: url, atomically: true, encoding: .utf8)
+            }
+            @MainActor func event(_ type: NSEvent.EventType, _ point: CGPoint) -> NSEvent? {
+                NSEvent.mouseEvent(with: type, location: view.convert(point, to: nil), modifierFlags: [],
+                                   timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                   context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
+            }
+            @MainActor func drag(_ from: CGPoint, _ to: CGPoint, _ label: String) {
+                guard let down = event(.leftMouseDown, from), let up = event(.leftMouseUp, to) else { return }
+                // PDFKit tracks the mouse in its own loop when the press lands on a form field, so queue the rest of the
+                // gesture first; whatever it leaves in the queue is delivered straight to the view.
+                for k in 1...8 {
+                    let t = CGFloat(k) / 8
+                    if let e = event(.leftMouseDragged, CGPoint(x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t)) { NSApp.postEvent(e, atStart: false) }
+                }
+                NSApp.postEvent(up, atStart: false)
+                view.mouseDown(with: down)
+                while let e = NSApp.nextEvent(matching: [.leftMouseDragged, .leftMouseUp], until: .distantPast, inMode: .default, dequeue: true) {
+                    if e.type == .leftMouseUp { view.mouseUp(with: e) } else { view.mouseDragged(with: e) }
+                }
+                let frame = textSelectionFrame.map { "\($0)" } ?? "nil"
+                note("drag \(label): edited=\(doc?.isDocumentEdited ?? false) menu=\(frame) selected=\(view.currentSelection?.string?.count ?? 0)")
+            }
+            let onPage = { (p: CGPoint) in view.convert(p, from: first) }
+            var steps: [@MainActor () -> Void] = [
+                { drag(onPage(CGPoint(x: 60, y: 625)), onPage(CGPoint(x: 320, y: 610)), "over text field") },
+                { drag(onPage(CGPoint(x: 45, y: 510)), onPage(CGPoint(x: 300, y: 480)), "over checkbox") },
+                { drag(onPage(CGPoint(x: 40, y: 720)), onPage(CGPoint(x: 400, y: 690)), "plain text") },
+                { drag(onPage(CGPoint(x: 100, y: 40)), onPage(CGPoint(x: 200, y: -60)), "into page gap") },
+            ]
+            for i in 0..<count {
+                steps.append {
+                    let b = view.bounds
+                    let a = CGPoint(x: .random(in: b.minX...b.maxX), y: .random(in: b.minY...b.maxY))
+                    let c = CGPoint(x: .random(in: b.minX...b.maxX), y: .random(in: b.minY...b.maxY))
+                    drag(a, c, "random \(i) \(Int(a.x)),\(Int(a.y))->\(Int(c.x)),\(Int(c.y))")
+                }
+            }
+            // PDFYAHO_QA_DRAG_THEN=checkbox ends with a real form edit, which must mark the document edited.
+            if ProcessInfo.processInfo.environment["PDFYAHO_QA_DRAG_THEN"] == "checkbox" {
+                steps.append { drag(onPage(CGPoint(x: 50, y: 510)), onPage(CGPoint(x: 50, y: 510)), "click checkbox") }
+            }
+            @MainActor func next() {
+                guard !steps.isEmpty else { note("drag done"); return }
+                steps.removeFirst()()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: next)
+            }
+            next()
+        }
+    }
+
     /// PDFYAHO_QA_SELECT=<phrase>: selects the first match 2 s after opening so the text menu shows.
     func runSelectQA(_ phrase: String) {
         guard fileURL != nil else { return }
