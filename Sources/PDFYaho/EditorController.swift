@@ -586,11 +586,16 @@ final class EditorController: ObservableObject {
             center.addObserver(forName: .PDFViewChangedHistory, object: view, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.historyChanged() }
             },
-            center.addObserver(forName: .PDFViewAnnotationHit, object: view, queue: .main) { [weak self] note in
-                // Form widgets are edited by PDFKit directly; record that the document changed.
-                let annotation = note.userInfo?["PDFAnnotationHit"] as? PDFAnnotation
+            center.addObserver(forName: .PDFViewAnnotationHit, object: view, queue: .main) { [weak self] _ in
+                // PDFKit toggles checkboxes and picks choices itself. A click alone is not an edit, so compare values.
+                MainActor.assumeIsolated { self?.checkFormFields() }
+            },
+            center.addObserver(forName: NSText.didChangeNotification, object: nil, queue: .main) { [weak self] note in
+                // Typing into a form field, which PDFKit edits in a text view inside the PDF view.
+                let text = note.object as? NSView
                 MainActor.assumeIsolated {
-                    if annotation?.type == "Widget" { self?.markEdited() }
+                    guard let self, let view = self.pdfView, let text, text.isDescendant(of: view) else { return }
+                    self.markEdited()
                 }
             },
         ]
@@ -748,6 +753,19 @@ final class EditorController: ObservableObject {
     func markEdited() {
         guard let window = pdfView?.window else { return }
         NSDocumentController.shared.document(for: window)?.updateChangeCount(.changeDone)
+    }
+
+    /// Form field values when the pointer went down, so `checkFormFields` can tell whether PDFKit changed one.
+    @ObservationIgnored private var formValues: [(field: PDFAnnotation, string: String?, state: PDFWidgetCellState)] = []
+
+    func watchFormFields(on page: PDFPage) {
+        formValues = page.annotations.filter { $0.type == "Widget" }.map { ($0, $0.widgetStringValue, $0.buttonWidgetState) }
+    }
+
+    func checkFormFields() {
+        guard formValues.contains(where: { $0.field.widgetStringValue != $0.string || $0.field.buttonWidgetState != $0.state }) else { return }
+        formValues = formValues.map { ($0.field, $0.field.widgetStringValue, $0.field.buttonWidgetState) }
+        markEdited()
     }
 
     /// Redraws the selection and other overlays after an annotation moved or resized in place.

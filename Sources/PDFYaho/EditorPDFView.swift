@@ -121,6 +121,9 @@ final class EditorPDFView: PDFView {
         window?.makeFirstResponder(self)
         guard let editor, let (page, point, viewPoint) = pagePoint(event) else { return super.mouseDown(with: event) }
         editor.textSelectionActive = false
+        // Clicking away has just committed any form field being typed in; count that before watching again.
+        editor.checkFormFields()
+        editor.watchFormFields(on: page)
         if editor.mode == .edit { contentMouseDown(event, editor: editor, page: page, point: point, viewPoint: viewPoint); return }
 
         if let (selected, anchor) = resizeAnchor(at: viewPoint) {
@@ -151,6 +154,8 @@ final class EditorPDFView: PDFView {
             }
             editor.select(nil)
             super.mouseDown(with: event)
+            // PDFKit tracks a press on a form field until release, so a checkbox has toggled by now.
+            editor.checkFormFields()
         case .highlight, .underline, .squiggly, .strikeout:
             editor.select(nil)
             super.mouseDown(with: event)
@@ -223,8 +228,11 @@ final class EditorPDFView: PDFView {
         switch drag {
         case let .move(selected, start, original):
             guard let (_, point, _) = pagePoint(event, page: selected.page) else { return }
+            // A click that wobbles a pixel is not a move, and would otherwise mark the document edited.
+            let delta = point - start
+            guard selected.annotation.bounds != original || hypot(delta.x, delta.y) * scaleFactor > 3 else { return }
             NSCursor.closedHand.set()
-            selected.annotation.bounds.origin = original.origin + (point - start)
+            selected.annotation.bounds.origin = original.origin + delta
             annotationsChanged(on: selected.page)
             editor.refreshOverlays()
         case let .resize(selected, anchor, _):
