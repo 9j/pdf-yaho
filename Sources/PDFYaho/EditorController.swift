@@ -488,7 +488,9 @@ final class EditorController: ObservableObject {
     private(set) var revision = 0
     private(set) var scale: CGFloat = 1
     var searchText = ""
-    private(set) var searchResults: [PDFSelection] = []
+    private(set) var searchResults: [SearchHit] = []
+    /// True while a search is still scanning pages; results arrive in batches.
+    private(set) var searching = false
     var searchIndex = 0
     var searchMatchCase = false { didSet { if !searchResults.isEmpty { search() } } }
     var searchWholeWords = false { didSet { if !searchResults.isEmpty { search() } } }
@@ -522,6 +524,9 @@ final class EditorController: ObservableObject {
     var focusPageField = false
 
     @ObservationIgnored private let thumbnails = ThumbnailCache()
+    @ObservationIgnored let textIndex = TextIndex()
+    @ObservationIgnored private var indexTask: Task<Void, Never>?
+    @ObservationIgnored private var searchTask: Task<Void, Never>?
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
 
     init(file: PDFFile) {
@@ -561,6 +566,7 @@ final class EditorController: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.historyArmed = true }
         view.editor = self
         view.document = document
+        buildTextIndex()
         applyLayout()
         applyTheme()
         let center = NotificationCenter.default
@@ -750,8 +756,9 @@ final class EditorController: ObservableObject {
     func changed(_ pages: [PDFPage] = []) {
         if pages.isEmpty {
             thumbnails.removeAll()
+            textIndex.removeAll()
         } else {
-            for page in pages { thumbnails.invalidate(page) }
+            for page in pages { thumbnails.invalidate(page); textIndex.invalidate(page) }
         }
         for page in pages { pdfView?.annotationsChanged(on: page) }
         revision += 1
@@ -1528,7 +1535,7 @@ final class EditorController: ObservableObject {
     var redactionStyle: Annotations.RedactionStyle = .blackout
 
     func markForRedaction(_ queries: [String], matchCase: Bool, wholeWords: Bool, style: Annotations.RedactionStyle) {
-        let results = queries.flatMap { Search.find($0, in: document, matchCase: matchCase, wholeWords: wholeWords) }
+        let results = queries.flatMap { Search.find($0, in: document, matchCase: matchCase, wholeWords: wholeWords, index: textIndex) }
         let marks = Search.redactionMarks(for: results, style: style)
         for (page, annotation) in marks { add(annotation, to: page) }
         undoManager?.setActionName("Mark for Redaction")
@@ -1900,6 +1907,19 @@ final class EditorController: ObservableObject {
     var revealSidebar = false
 
     /// - Parameter remember: adds the query to search history (on Return, not while typing).
+    deinit {
+        indexTask?.cancel()
+        searchTask?.cancel()
+    }
+
+    /// Extracts page text in the background so the first search doesn't have to.
+    private func buildTextIndex() {
+        indexTask?.cancel()
+        let pages = UncheckedPages((0..<document.pageCount).compactMap { document.page(at: $0) })
+        let index = textIndex
+        indexTask = Task.detached(priority: .utility) { await index.fill(pages.pages) }
+    }
+
     func search(remember: Bool = true) {
         let query = searchText.trimmingCharacters(in: .whitespaces)
         guard !query.isEmpty else { clearSearch(); return }
@@ -1908,16 +1928,60 @@ final class EditorController: ObservableObject {
             UserDefaults.standard.set(searchHistory, forKey: "searchHistory")
         }
         if mode == .pages { mode = .read }
-        searchResults = Search.find(query, in: document, matchCase: searchMatchCase, wholeWords: searchWholeWords)
-        for result in searchResults { result.color = NSColor.systemYellow.withAlphaComponent(0.55) }
-        pdfView?.highlightedSelections = searchResults
+        searchTask?.cancel()
+        searchResults = []
+        pdfView?.highlightedSelections = nil
         searchIndex = 0
+        searching = true
         sidebarTab = .search
-        if !searchResults.isEmpty { revealSidebar = true }
-        if let first = searchResults.first { go(to: first) }
+        let pages = UncheckedPages((0..<document.pageCount).compactMap { document.page(at: $0) })
+        let index = textIndex, matchCase = searchMatchCase, wholeWords = searchWholeWords
+        let batches = AsyncStream<[SearchHit]> { continuation in
+            let scan = Task.detached(priority: .userInitiated) {
+                var batch: [SearchHit] = []
+                var lastSent: Date?
+                var found = 0
+                for (number, page) in pages.pages.enumerated() {
+                    if Task.isCancelled { break }
+                    let text = index.text(of: page)
+                    for range in TextIndex.ranges(of: query, in: text, matchCase: matchCase, wholeWords: wholeWords) {
+                        guard let selection = page.selection(for: range) else { continue }
+                        selection.color = NSColor.systemYellow.withAlphaComponent(0.55)
+                        found += 1
+                        batch.append(SearchHit(id: found - 1, selection: selection, pageIndex: number, snippet: TextIndex.snippet(for: range, in: text)))
+                    }
+                    // The first match shows at once; after that, once a second, since every update
+                    // re-lists and re-highlights all results so far.
+                    if !batch.isEmpty, lastSent.map({ Date().timeIntervalSince($0) > 1 }) ?? true {
+                        continuation.yield(batch)
+                        batch = []
+                        lastSent = Date()
+                    }
+                }
+                if !batch.isEmpty { continuation.yield(batch) }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in scan.cancel() }
+        }
+        searchTask = Task { [weak self] in
+            var first = true
+            for await batch in batches {
+                guard let self, !Task.isCancelled else { return }
+                self.searchResults += batch
+                self.pdfView?.highlightedSelections = self.searchResults.map(\.selection)
+                if first {
+                    first = false
+                    self.revealSidebar = true
+                    self.go(to: batch[0].selection)
+                }
+            }
+            if !Task.isCancelled { self?.searching = false }
+        }
     }
 
     func clearSearch() {
+        searchTask?.cancel()
+        searching = false
         searchResults = []
         pdfView?.highlightedSelections = nil
         if sidebarTab == .search { sidebarTab = .thumbnails }
@@ -1926,7 +1990,7 @@ final class EditorController: ObservableObject {
     func findNext(_ step: Int = 1) {
         guard !searchResults.isEmpty else { search(); return }
         searchIndex = (searchIndex + step + searchResults.count) % searchResults.count
-        go(to: searchResults[searchIndex])
+        go(to: searchResults[searchIndex].selection)
     }
 
     func unlock(with password: String) -> Bool {
@@ -2004,4 +2068,19 @@ final class EditorController: ObservableObject {
         setPages(PDFOps.adopt(recognized), actionName: "Recognize Text")
         showToast(found > pageCount - scanned ? "Text recognized — the document is now searchable" : "No legible text found")
     }
+}
+
+/// One search match, with the words around it for the results list.
+struct SearchHit: Identifiable, @unchecked Sendable {
+    /// Position among the search's results.
+    let id: Int
+    let selection: PDFSelection
+    let pageIndex: Int
+    let snippet: (before: String, match: String, after: String)
+}
+
+/// Pages handed to a background task that only reads them.
+struct UncheckedPages: @unchecked Sendable {
+    let pages: [PDFPage]
+    init(_ pages: [PDFPage]) { self.pages = pages }
 }

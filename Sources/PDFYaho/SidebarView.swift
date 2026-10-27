@@ -411,12 +411,16 @@ struct SearchResultList: View {
             } description: {
                 Text("Type in the search field in the toolbar. Results appear here as you type.")
             }
+        } else if editor.searchResults.isEmpty, editor.searching {
+            ProgressView("Searching…").controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if editor.searchResults.isEmpty {
             ContentUnavailableView.search(text: editor.searchText)
         } else {
             VStack(spacing: 0) {
                 HStack {
-                    Text("\(editor.searchResults.count) results").font(.caption).foregroundStyle(.secondary)
+                    Text(editor.searching ? "\(editor.searchResults.count) results so far…" : "\(editor.searchResults.count) results")
+                        .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                    if editor.searching { ProgressView().controlSize(.mini) }
                     Spacer()
                     Menu {
                         Toggle("Match Case", isOn: $editor.searchMatchCase)
@@ -436,44 +440,52 @@ struct SearchResultList: View {
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 6)
-                List(Array(editor.searchResults.enumerated()), id: \.offset) { index, result in
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Page \((result.pages.first.map { editor.document.index(for: $0) } ?? 0) + 1)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text(context(result)).font(.callout).lineLimit(3)
+                // A lazy stack builds only the rows on screen; a List rebuilt all of them each time results arrived.
+                ScrollView {
+                    LazyVStack(spacing: 2) {
+                        ForEach(editor.searchResults) { result in
+                            SearchResultRow(hit: result, page: editor.pageLabel(result.pageIndex), current: result.id == editor.searchIndex)
+                                .onTapGesture {
+                                    editor.searchIndex = result.id
+                                    editor.go(to: result.selection)
+                                }
+                        }
                     }
-                    .padding(.vertical, 3)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                    .listRowBackground(index == editor.searchIndex
-                        ? RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(0.15)).padding(.horizontal, 6) : nil)
-                    .onTapGesture {
-                        editor.searchIndex = index
-                        editor.go(to: result)
-                    }
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 8)
                 }
-                .listStyle(.sidebar)
             }
         }
     }
+}
 
-    /// The match with some surrounding words, cut at word boundaries and with the match in bold.
-    private func context(_ result: PDFSelection) -> AttributedString {
-        let match = result.string ?? ""
-        guard let extended = result.copy() as? PDFSelection else { return AttributedString(match) }
-        extended.extend(atStart: 30)
-        extended.extend(atEnd: 40)
-        let full = (extended.string ?? match).replacingOccurrences(of: "\n", with: " ")
-        guard let range = full.range(of: match, options: [.caseInsensitive, .diacriticInsensitive]) else { return AttributedString(full) }
-        var before = String(full[..<range.lowerBound])
-        var after = String(full[range.upperBound...])
-        if before.count >= 30, let space = before.firstIndex(of: " ") { before = "…" + before[before.index(after: space)...] }
-        if after.count >= 40, let space = after.lastIndex(of: " ") { after = after[..<space] + "…" }
-        var bold = AttributedString(String(full[range]))
+private struct SearchResultRow: View, Equatable {
+    let hit: SearchHit
+    let page: String
+    let current: Bool
+
+    static func == (a: Self, b: Self) -> Bool { a.hit.id == b.hit.id && a.hit.selection === b.hit.selection && a.page == b.page && a.current == b.current }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("Page \(page)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(context).font(.callout).lineLimit(3)
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 6).fill(current ? Color.accentColor.opacity(0.15) : .clear))
+        .contentShape(Rectangle())
+    }
+
+    /// The match in bold, with the words around it.
+    private var context: AttributedString {
+        var bold = AttributedString(hit.snippet.match)
         bold.font = .callout.bold()
         bold.backgroundColor = Color.yellow.opacity(0.35)
-        return AttributedString(before) + bold + AttributedString(after)
+        return AttributedString(hit.snippet.before) + bold + AttributedString(hit.snippet.after)
     }
 }
 

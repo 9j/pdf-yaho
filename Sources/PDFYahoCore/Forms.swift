@@ -95,23 +95,12 @@ extension Annotations {
 
 public enum Search {
     /// Matches of `query` in `doc`, optionally case sensitive and limited to whole words.
-    public static func find(_ query: String, in doc: PDFDocument, matchCase: Bool, wholeWords: Bool) -> [PDFSelection] {
-        let options: NSString.CompareOptions = matchCase ? [] : [.caseInsensitive, .diacriticInsensitive]
-        let results = doc.findString(query, withOptions: options)
-        guard wholeWords else { return results }
-        return results.filter { isWholeWord($0) }
-    }
-
-    static func isWholeWord(_ selection: PDFSelection) -> Bool {
-        guard let match = selection.string, let extended = selection.copy() as? PDFSelection else { return true }
-        extended.extend(atStart: 1)
-        extended.extend(atEnd: 1)
-        let text = extended.string ?? match
-        guard let range = text.range(of: match) else { return true }
-        let before = text[..<range.lowerBound].last
-        let after = text[range.upperBound...].first
-        func isWordChar(_ c: Character?) -> Bool { c.map { $0.isLetter || $0.isNumber } ?? false }
-        return !isWordChar(before) && !isWordChar(after)
+    public static func find(_ query: String, in doc: PDFDocument, matchCase: Bool, wholeWords: Bool,
+                            index: TextIndex = TextIndex()) -> [PDFSelection] {
+        (0..<doc.pageCount).compactMap { doc.page(at: $0) }.flatMap { page in
+            TextIndex.ranges(of: query, in: index.text(of: page), matchCase: matchCase, wholeWords: wholeWords)
+                .compactMap { page.selection(for: $0) }
+        }
     }
 
     /// Redaction marks over every match, one per line of each match.
