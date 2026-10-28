@@ -459,7 +459,10 @@ final class EditorPDFView: PDFView {
     @objc override func copy(_ sender: Any?) {
         if editor?.mode == .pages { editor?.copyPages(); return }
         if editor?.mode == .edit, editor?.selectedContent?.kind == .text { editor?.copySelectedContentText(); return }
-        if let editor, editor.selected != nil { editor.copySelectedAnnotation() } else { super.copy(sender) }
+        if let editor, editor.selected != nil { editor.copySelectedAnnotation(); return }
+        guard let text = currentSelection?.string, !text.isEmpty else { return super.copy(sender) }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(PageText.plain(text), forType: .string)
     }
 
     @objc func cut(_ sender: Any?) {

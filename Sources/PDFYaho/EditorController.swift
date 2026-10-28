@@ -1154,7 +1154,7 @@ final class EditorController: ObservableObject {
     func copySelection() {
         guard let text = pdfView?.currentSelection?.string else { return }
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        NSPasteboard.general.setString(PageText.plain(text), forType: .string)
         textSelectionActive = false
         showToast("Copied")
     }
