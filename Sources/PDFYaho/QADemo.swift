@@ -511,6 +511,47 @@ extension EditorController {
         }
     }
 
+    /// PDFYAHO_QA_TEXTDRAG=<page>|<from>|<to>: drags from the start of one phrase to the end of another on that page
+    /// (numbered from 1), as a hand would, and logs what got selected to /tmp/pdfyaho-qa.log.
+    func runTextDragQA(_ spec: String) {
+        let parts = spec.components(separatedBy: "|")
+        guard fileURL != nil, parts.count == 3, let number = Int(parts[0]), let page = document.page(at: number - 1) else { return }
+        // A phrase, or "x,y" in page points for text that search can't find (Korean with hidden joiners, say).
+        func bounds(_ phrase: String) -> CGRect? {
+            let xy = phrase.split(separator: ",").compactMap { Double($0) }
+            if xy.count == 2 { return CGRect(x: xy[0] - 1, y: xy[1], width: 2, height: 0) }
+            return document.findString(phrase, withOptions: []).first { $0.pages.first === page }?.bounds(for: page)
+        }
+        guard let start = bounds(parts[1]), let end = bounds(parts[2]) else { return }
+        pdfView?.go(to: CGRect(x: start.minX, y: start.midY + 200, width: 1, height: 1), on: page)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [self] in
+            guard let view = pdfView, let window = view.window else { return }
+            let a = view.convert(CGPoint(x: start.minX + 1, y: start.midY), from: page)
+            let b = view.convert(CGPoint(x: end.maxX - 1, y: end.midY), from: page)
+            func event(_ type: NSEvent.EventType, _ point: CGPoint) -> NSEvent? {
+                NSEvent.mouseEvent(with: type, location: view.convert(point, to: nil), modifierFlags: [],
+                                   timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                   context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
+            }
+            guard let down = event(.leftMouseDown, a), let up = event(.leftMouseUp, b) else { return }
+            for k in 1...12 {
+                let t = CGFloat(k) / 12
+                if let e = event(.leftMouseDragged, CGPoint(x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t)) { NSApp.postEvent(e, atStart: false) }
+            }
+            NSApp.postEvent(up, atStart: false)
+            view.mouseDown(with: down)
+            while let e = NSApp.nextEvent(matching: [.leftMouseDragged, .leftMouseUp], until: .distantPast, inMode: .default, dequeue: true) {
+                if e.type == .leftMouseUp { view.mouseUp(with: e) } else { view.mouseDragged(with: e) }
+            }
+            // In Edit mode the press opens the paragraph for typing and the drag selects inside it.
+            let typing = view.subviews.lazy.compactMap { $0 as? InlineTextEditor }.first
+            let text = typing.map { "typing: " + ($0.string as NSString).substring(with: $0.selectedRange()) }
+                ?? PageText.plain(view.currentSelection?.string ?? "nil")
+            let url = URL(fileURLWithPath: "/tmp/pdfyaho-qa.log")
+            try? ("textdrag \(a)->\(b): \(text.debugDescription)\n").write(to: url, atomically: true, encoding: .utf8)
+        }
+    }
+
     /// PDFYAHO_QA_SELECT=<phrase>: selects the first match 2 s after opening so the text menu shows.
     func runSelectQA(_ phrase: String) {
         guard fileURL != nil else { return }
