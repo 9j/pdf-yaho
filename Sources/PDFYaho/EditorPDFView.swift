@@ -284,11 +284,7 @@ final class EditorPDFView: PDFView {
         case let .content(block, page, _, moved):
             let frame = editor.contentDragFrame
             editor.contentDragFrame = nil
-            if moved, let frame {
-                editor.moveContent(block, on: page, to: frame)
-            } else if block.kind == .text {
-                beginContentEditing(block, on: page)
-            }
+            if moved, let frame { editor.moveContent(block, on: page, to: frame) }
         case let .contentResize(block, page, _):
             if let frame = editor.contentDragFrame, frame.width > 4 { editor.moveContent(block, on: page, to: frame) }
             editor.contentDragFrame = nil
@@ -513,7 +509,7 @@ final class EditorPDFView: PDFView {
         case .addContentText: NSCursor.iBeam.set()
         case .addContentImage: NSCursor.crosshair.set()
         default:
-            if let hovered { (hovered.kind == .text ? NSCursor.iBeam : NSCursor.openHand).set() } else { NSCursor.arrow.set() }
+            if let hovered { (hovered.kind == .text && hovered.bounds.contains(point) ? NSCursor.iBeam : NSCursor.openHand).set() } else { NSCursor.arrow.set() }
         }
     }
 
@@ -546,6 +542,13 @@ final class EditorPDFView: PDFView {
                 return
             }
             editor.selectedContent = block
+            // Pressing inside a paragraph types into it and dragging selects words, as in a word processor;
+            // the outline around it moves it.
+            if block.kind == .text, event.clickCount == 1, block.bounds.contains(point) {
+                beginContentEditing(block, on: page)
+                inline?.mouseDown(with: event)
+                return
+            }
             drag = .content(block, page: page, start: point, moved: false)
         }
     }

@@ -40,7 +40,8 @@ extension EditorController {
     /// The innermost block under `point`, loading the page's blocks first.
     func contentBlock(at point: CGPoint, on page: PDFPage) -> ContentBlock? {
         loadContent(on: page)
-        let slack = 3 / max(scale, 0.1)
+        // Wide enough around a paragraph to grab its outline and move it.
+        let slack = 6 / max(scale, 0.1)
         return contentBlocks
             .filter { $0.bounds.insetBy(dx: -slack, dy: -slack).contains(point) }
             .min { $0.bounds.width * $0.bounds.height < $1.bounds.width * $1.bounds.height }
