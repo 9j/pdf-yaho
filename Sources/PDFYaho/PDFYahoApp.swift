@@ -133,6 +133,7 @@ struct PDFYahoCommands: Commands {
                 .disabled(editor == nil)
         }
         CommandGroup(after: .textEditing) {
+            Button("Find…") { editor?.focusSearch() }.keyboardShortcut("f").disabled(editor == nil)
             Button("Find Next") { editor?.findNext() }.keyboardShortcut("g")
             Button("Find Previous") { editor?.findNext(-1) }.keyboardShortcut("g", modifiers: [.command, .shift])
         }

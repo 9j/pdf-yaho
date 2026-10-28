@@ -1941,6 +1941,12 @@ final class EditorController: ObservableObject {
         indexTask = Task.detached(priority: .utility) { await index.fill(pages.pages) }
     }
 
+    /// Puts the cursor in the toolbar search field, as Find… does in other Mac apps.
+    func focusSearch() {
+        let field = pdfView?.window?.toolbar?.items.lazy.compactMap { $0 as? NSSearchToolbarItem }.first
+        field?.beginSearchInteraction()
+    }
+
     func search(remember: Bool = true) {
         let query = searchText.trimmingCharacters(in: .whitespaces)
         guard !query.isEmpty else { clearSearch(); return }
